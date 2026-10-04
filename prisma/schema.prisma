@@ -1,0 +1,726 @@
+// Esquema de base de datos del sistema de ventas.
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────
+// AUTH (better-auth + plugins `username` y `admin`)
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id                 String    @id
+  name               String
+  email              String    @unique
+  emailVerified      Boolean   @default(false)
+  image              String?
+  /// Plugin username: siempre en minúsculas
+  username           String?   @unique
+  displayUsername    String?
+  /// Plugin admin: admin | vendedor | almacenero
+  role               String?   @default("vendedor")
+  /// Plugin admin: usuario desactivado
+  banned             Boolean?  @default(false)
+  banReason          String?
+  banExpires         DateTime? @db.Timestamptz(3)
+  /// Obliga a cambiar la contraseña en el siguiente ingreso
+  mustChangePassword Boolean   @default(true)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
+  sessions           Session[]
+  accounts           Account[]
+
+  // Relaciones de negocio
+  comprasCreadas        Compra[]                 @relation("CompraCreadaPor")
+  comprasRecibidas      Compra[]                 @relation("CompraRecibidaPor")
+  comprasAnuladas       Compra[]                 @relation("CompraAnuladaPor")
+  pagosCompra           PagoCompra[]
+  ventas                Venta[]                  @relation("VentaVendedor")
+  ventasEntregadas      Venta[]                  @relation("VentaEntregadaPor")
+  ventasAnuladas        Venta[]                  @relation("VentaAnuladaPor")
+  pagosRegistrados      Pago[]                   @relation("PagoRegistradoPor")
+  pagosAnulados         Pago[]                   @relation("PagoAnuladoPor")
+  ordenesComoTecnico    OrdenServicio[]
+  historialOrdenes      OrdenServicioHistorial[]
+  ajustesInventario     AjusteInventario[]
+  movimientosInventario MovimientoInventario[]
+  auditorias            Auditoria[]
+
+  @@map("user")
+}
+
+model Session {
+  id             String   @id
+  expiresAt      DateTime @db.Timestamptz(3)
+  token          String   @unique
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+  ipAddress      String?
+  userAgent      String?
+  /// Plugin admin
+  impersonatedBy String?
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime? @db.Timestamptz(3)
+  refreshTokenExpiresAt DateTime? @db.Timestamptz(3)
+  scope                 String?
+  /// Hash de la contraseña (providerId = "credential")
+  password              String?
+  createdAt             DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime  @updatedAt @db.Timestamptz(3)
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+// ─────────────────────────────────────────────────────────────
+// CONFIGURACIÓN DE LA TIENDA
+// ─────────────────────────────────────────────────────────────
+
+enum FormatoTicket {
+  MM58
+  MM80
+  A4
+}
+
+/// Fila única (id = 1) con los datos de la tienda
+model Configuracion {
+  id                Int           @id @default(1)
+  nombreComercial   String
+  razonSocial       String?
+  ruc               String?
+  direccion         String?
+  telefono          String?
+  email             String?
+  logoUrl           String?
+  tituloComprobante String        @default("BOLETA DE VENTA")
+  piePagina         String?
+  formatoTicket     FormatoTicket @default(MM80)
+  updatedAt         DateTime      @updatedAt @db.Timestamptz(3)
+
+  @@map("configuracion")
+}
+
+enum TipoSerie {
+  BOLETA
+  ORDEN_SERVICIO
+  COMPRA
+}
+
+/// Correlativos (B001, OS01, OC01). El número se toma con
+/// UPDATE ... SET ultimo_numero = ultimo_numero + 1 RETURNING dentro de la transacción.
+model Serie {
+  id           Int       @id @default(autoincrement())
+  tipo         TipoSerie
+  serie        String    @db.VarChar(4)
+  ultimoNumero Int       @default(0)
+  activa       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
+
+  @@unique([tipo, serie])
+  @@map("serie")
+}
+
+/// Registro de acciones sensibles: anulaciones, cambios de precio, de rol, de clave, etc.
+model Auditoria {
+  id        Int      @id @default(autoincrement())
+  usuarioId String
+  usuario   User     @relation(fields: [usuarioId], references: [id])
+  accion    String
+  entidad   String
+  entidadId String
+  datos     Json?
+  fecha     DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([entidad, entidadId])
+  @@index([fecha])
+  @@map("auditoria")
+}
+
+// ─────────────────────────────────────────────────────────────
+// CATÁLOGOS
+// ─────────────────────────────────────────────────────────────
+
+model Marca {
+  id        Int        @id @default(autoincrement())
+  nombre    String     @unique
+  activo    Boolean    @default(true)
+  createdAt DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime   @updatedAt @db.Timestamptz(3)
+  productos Producto[]
+
+  @@map("marca")
+}
+
+/// Comercial, de precisión, industrial, ...
+model UsoBalanza {
+  id        Int        @id @default(autoincrement())
+  nombre    String     @unique
+  activo    Boolean    @default(true)
+  createdAt DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime   @updatedAt @db.Timestamptz(3)
+  productos Producto[]
+
+  @@map("uso_balanza")
+}
+
+/// Plataforma, mostrador, colgante, ...
+model FormaBalanza {
+  id        Int        @id @default(autoincrement())
+  nombre    String     @unique
+  activo    Boolean    @default(true)
+  createdAt DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime   @updatedAt @db.Timestamptz(3)
+  productos Producto[]
+
+  @@map("forma_balanza")
+}
+
+/// Efectivo, Yape, Plin, Transferencia, Tarjeta, Otro
+model MetodoPago {
+  id                 Int          @id @default(autoincrement())
+  nombre             String       @unique
+  esEfectivo         Boolean      @default(false)
+  requiereReferencia Boolean      @default(false)
+  orden              Int          @default(0)
+  activo             Boolean      @default(true)
+  createdAt          DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime     @updatedAt @db.Timestamptz(3)
+  pagos              Pago[]
+  pagosCompra        PagoCompra[]
+
+  @@map("metodo_pago")
+}
+
+/// Cambio de batería, cambio de sensor, reparación, calibración, ...
+model Servicio {
+  id                Int            @id @default(autoincrement())
+  nombre            String         @unique
+  descripcion       String?
+  precioReferencial Decimal        @db.Decimal(12, 2)
+  activo            Boolean        @default(true)
+  createdAt         DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime       @updatedAt @db.Timestamptz(3)
+  ventaDetalles     VentaDetalle[]
+
+  @@map("servicio")
+}
+
+// ─────────────────────────────────────────────────────────────
+// PRODUCTOS
+// ─────────────────────────────────────────────────────────────
+
+enum TipoProducto {
+  BALANZA
+  BATERIA
+  ENCHUFE
+  SENSOR
+  TARJETA
+  REPUESTO
+  OTRO
+}
+
+enum Funcionamiento {
+  DIGITAL
+  MECANICA_RELOJ
+  MECANICA_ROMANA
+}
+
+enum TipoEnchufe {
+  PUNTA
+  TRIANGULAR
+}
+
+/// Modelo general del producto. Las características dependen del tipo
+/// (validadas con Zod mediante una unión discriminada por `tipo`).
+model Producto {
+  id             Int             @id @default(autoincrement())
+  tipo           TipoProducto
+  nombre         String
+  modelo         String?
+  marcaId        Int?
+  marca          Marca?          @relation(fields: [marcaId], references: [id], onDelete: Restrict)
+  descripcion    String?
+  observaciones  String?
+  // BALANZA
+  usoId          Int?
+  uso            UsoBalanza?     @relation(fields: [usoId], references: [id], onDelete: Restrict)
+  formaId        Int?
+  forma          FormaBalanza?   @relation(fields: [formaId], references: [id], onDelete: Restrict)
+  funcionamiento Funcionamiento?
+  /// BALANZA y SENSOR
+  capacidadKg    Decimal?        @db.Decimal(10, 3)
+  /// BALANZA
+  precisionG     Decimal?        @db.Decimal(10, 3)
+  /// BATERIA (4, 6, ...)
+  voltaje        Decimal?        @db.Decimal(5, 2)
+  /// ENCHUFE
+  tipoEnchufe    TipoEnchufe?
+  activo         Boolean         @default(true)
+  createdAt      DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime        @updatedAt @db.Timestamptz(3)
+  presentaciones Presentacion[]
+
+  @@index([tipo])
+  @@index([marcaId])
+  @@index([nombre])
+  @@map("producto")
+}
+
+/// Lo que se vende y tiene stock (ej. KD-11V angosta / KD-21V ancha).
+/// Todo producto tiene al menos una presentación ("Estándar").
+model Presentacion {
+  id              Int                    @id @default(autoincrement())
+  productoId      Int
+  producto        Producto               @relation(fields: [productoId], references: [id])
+  nombre          String                 @default("Estándar")
+  codigo          String                 @unique
+  codigoBarras    String?                @unique
+  precioVenta     Decimal                @db.Decimal(12, 2)
+  precioMinimo    Decimal                @db.Decimal(12, 2)
+  costoPromedio   Decimal                @default(0) @db.Decimal(12, 4)
+  ultimoCosto     Decimal                @default(0) @db.Decimal(12, 2)
+  stock           Int                    @default(0)
+  stockMinimo     Int                    @default(0)
+  /// Sugerencia de unidades por caja al registrar compras
+  unidadesPorCaja Int?
+  activo          Boolean                @default(true)
+  createdAt       DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime               @updatedAt @db.Timestamptz(3)
+  compraDetalles  CompraDetalle[]
+  ventaDetalles   VentaDetalle[]
+  movimientos     MovimientoInventario[]
+
+  @@unique([productoId, nombre])
+  @@map("presentacion")
+}
+
+// ─────────────────────────────────────────────────────────────
+// TERCEROS
+// ─────────────────────────────────────────────────────────────
+
+enum TipoDocIdentidad {
+  DNI
+  RUC
+  CE
+  PASAPORTE
+  OTRO
+}
+
+model Cliente {
+  id              Int               @id @default(autoincrement())
+  tipoDocumento   TipoDocIdentidad?
+  numeroDocumento String?
+  nombre          String
+  telefono        String?
+  direccion       String?
+  email           String?
+  notas           String?
+  activo          Boolean           @default(true)
+  createdAt       DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime          @updatedAt @db.Timestamptz(3)
+  ventas          Venta[]
+
+  @@unique([tipoDocumento, numeroDocumento])
+  @@index([nombre])
+  @@map("cliente")
+}
+
+model Proveedor {
+  id          Int      @id @default(autoincrement())
+  ruc         String?  @unique
+  razonSocial String
+  contacto    String?
+  telefono    String?
+  email       String?
+  direccion   String?
+  notas       String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+  compras     Compra[]
+
+  @@index([razonSocial])
+  @@map("proveedor")
+}
+
+// ─────────────────────────────────────────────────────────────
+// COMPRAS
+// ─────────────────────────────────────────────────────────────
+
+enum EstadoCompra {
+  PENDIENTE
+  RECIBIDA
+  ANULADA
+}
+
+enum EstadoPago {
+  PENDIENTE
+  PARCIAL
+  PAGADO
+}
+
+enum TipoEmpaque {
+  UNIDAD
+  CAJA
+  DECENA
+  DOCENA
+  CIENTO
+}
+
+model Compra {
+  id                 Int                    @id @default(autoincrement())
+  serie              String                 @db.VarChar(4)
+  numero             Int
+  proveedorId        Int
+  proveedor          Proveedor              @relation(fields: [proveedorId], references: [id])
+  estado             EstadoCompra           @default(PENDIENTE)
+  fechaPedido        DateTime               @db.Timestamptz(3)
+  fechaRecepcion     DateTime?              @db.Timestamptz(3)
+  /// N° de factura / guía del proveedor
+  documentoProveedor String?
+  total              Decimal                @db.Decimal(12, 2)
+  montoPagado        Decimal                @default(0) @db.Decimal(12, 2)
+  estadoPago         EstadoPago             @default(PENDIENTE)
+  observaciones      String?
+  creadoPorId        String
+  creadoPor          User                   @relation("CompraCreadaPor", fields: [creadoPorId], references: [id])
+  recibidoPorId      String?
+  recibidoPor        User?                  @relation("CompraRecibidaPor", fields: [recibidoPorId], references: [id], onDelete: Restrict)
+  anuladoPorId       String?
+  anuladoPor         User?                  @relation("CompraAnuladaPor", fields: [anuladoPorId], references: [id], onDelete: Restrict)
+  fechaAnulacion     DateTime?              @db.Timestamptz(3)
+  motivoAnulacion    String?
+  createdAt          DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime               @updatedAt @db.Timestamptz(3)
+  detalles           CompraDetalle[]
+  pagos              PagoCompra[]
+  movimientos        MovimientoInventario[]
+
+  @@unique([serie, numero])
+  @@index([proveedorId])
+  @@index([estado])
+  @@index([fechaPedido])
+  @@map("compra")
+}
+
+model CompraDetalle {
+  id                 Int          @id @default(autoincrement())
+  compraId           Int
+  compra             Compra       @relation(fields: [compraId], references: [id], onDelete: Cascade)
+  presentacionId     Int
+  presentacion       Presentacion @relation(fields: [presentacionId], references: [id])
+  empaque            TipoEmpaque
+  unidadesPorEmpaque Int
+  cantidadEmpaques   Int
+  /// = cantidadEmpaques × unidadesPorEmpaque
+  cantidadUnidades   Int
+  /// Se confirma al recibir la mercadería
+  cantidadRecibida   Int?
+  costoEmpaque       Decimal      @db.Decimal(12, 2)
+  costoUnitario      Decimal      @db.Decimal(12, 4)
+  subtotal           Decimal      @db.Decimal(12, 2)
+
+  @@index([compraId])
+  @@index([presentacionId])
+  @@map("compra_detalle")
+}
+
+model PagoCompra {
+  id              Int        @id @default(autoincrement())
+  compraId        Int
+  compra          Compra     @relation(fields: [compraId], references: [id])
+  metodoPagoId    Int
+  metodoPago      MetodoPago @relation(fields: [metodoPagoId], references: [id])
+  monto           Decimal    @db.Decimal(12, 2)
+  referencia      String?
+  fecha           DateTime   @default(now()) @db.Timestamptz(3)
+  usuarioId       String
+  usuario         User       @relation(fields: [usuarioId], references: [id])
+  anulado         Boolean    @default(false)
+  motivoAnulacion String?
+
+  @@index([compraId])
+  @@map("pago_compra")
+}
+
+// ─────────────────────────────────────────────────────────────
+// VENTAS Y SERVICIOS
+// Una orden de servicio es una Venta de tipo SERVICIO + OrdenServicio (1:1)
+// ─────────────────────────────────────────────────────────────
+
+enum TipoVenta {
+  VENTA
+  SERVICIO
+}
+
+/// ABIERTA solo aplica a órdenes de servicio (aún sin comprobante)
+enum EstadoVenta {
+  ABIERTA
+  EMITIDA
+  ANULADA
+}
+
+enum EstadoEntrega {
+  PENDIENTE
+  ENTREGADO
+}
+
+enum TipoItem {
+  PRODUCTO
+  SERVICIO
+}
+
+model Venta {
+  id              Int                    @id @default(autoincrement())
+  tipo            TipoVenta              @default(VENTA)
+  estado          EstadoVenta
+  /// Serie, número y fecha se asignan al emitir el comprobante
+  serie           String?                @db.VarChar(4)
+  numero          Int?
+  fechaEmision    DateTime?              @db.Timestamptz(3)
+  /// null = Cliente general
+  clienteId       Int?
+  cliente         Cliente?               @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  vendedorId      String
+  vendedor        User                   @relation("VentaVendedor", fields: [vendedorId], references: [id])
+  /// Suma de precios de lista
+  totalLista      Decimal                @db.Decimal(12, 2)
+  /// totalLista - total
+  descuento       Decimal                @default(0) @db.Decimal(12, 2)
+  total           Decimal                @db.Decimal(12, 2)
+  montoPagado     Decimal                @default(0) @db.Decimal(12, 2)
+  saldo           Decimal                @db.Decimal(12, 2)
+  estadoPago      EstadoPago             @default(PENDIENTE)
+  estadoEntrega   EstadoEntrega          @default(PENDIENTE)
+  fechaEntrega    DateTime?              @db.Timestamptz(3)
+  entregadoPorId  String?
+  entregadoPor    User?                  @relation("VentaEntregadaPor", fields: [entregadoPorId], references: [id], onDelete: Restrict)
+  observaciones   String?
+  anuladoPorId    String?
+  anuladoPor      User?                  @relation("VentaAnuladaPor", fields: [anuladoPorId], references: [id], onDelete: Restrict)
+  fechaAnulacion  DateTime?              @db.Timestamptz(3)
+  motivoAnulacion String?
+  /// Código aleatorio para ver la boleta sin iniciar sesión (enlace por WhatsApp). Se genera al compartir.
+  tokenPublico    String?                @unique
+  createdAt       DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime               @updatedAt @db.Timestamptz(3)
+  detalles        VentaDetalle[]
+  pagos           Pago[]
+  ordenServicio   OrdenServicio?
+  movimientos     MovimientoInventario[]
+
+  @@unique([serie, numero])
+  @@index([fechaEmision])
+  @@index([estado])
+  @@index([estadoPago])
+  @@index([estadoEntrega])
+  @@index([clienteId])
+  @@index([vendedorId])
+  @@map("venta")
+}
+
+model VentaDetalle {
+  id             Int           @id @default(autoincrement())
+  ventaId        Int
+  venta          Venta         @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  tipoItem       TipoItem
+  presentacionId Int?
+  presentacion   Presentacion? @relation(fields: [presentacionId], references: [id], onDelete: Restrict)
+  servicioId     Int?
+  servicio       Servicio?     @relation(fields: [servicioId], references: [id], onDelete: Restrict)
+  /// Copia del nombre al momento de la venta
+  descripcion    String
+  cantidad       Int
+  precioLista    Decimal       @db.Decimal(12, 2)
+  /// Precio cobrado (editable)
+  precioUnitario Decimal       @db.Decimal(12, 2)
+  /// Copia del costo promedio al momento de la venta (0 en servicios)
+  costoUnitario  Decimal       @default(0) @db.Decimal(12, 4)
+  subtotal       Decimal       @db.Decimal(12, 2)
+
+  @@index([ventaId])
+  @@index([presentacionId])
+  @@map("venta_detalle")
+}
+
+/// Pagos mixtos (varias filas en el acto) y por partes (en distintos días)
+model Pago {
+  id              Int        @id @default(autoincrement())
+  ventaId         Int
+  venta           Venta      @relation(fields: [ventaId], references: [id])
+  metodoPagoId    Int
+  metodoPago      MetodoPago @relation(fields: [metodoPagoId], references: [id])
+  monto           Decimal    @db.Decimal(12, 2)
+  /// Efectivo: lo que entregó el cliente (para calcular el vuelto)
+  montoRecibido   Decimal?   @db.Decimal(12, 2)
+  /// N° de operación Yape/Plin/transferencia
+  referencia      String?
+  fecha           DateTime   @default(now()) @db.Timestamptz(3)
+  usuarioId       String
+  usuario         User       @relation("PagoRegistradoPor", fields: [usuarioId], references: [id])
+  anulado         Boolean    @default(false)
+  anuladoPorId    String?
+  anuladoPor      User?      @relation("PagoAnuladoPor", fields: [anuladoPorId], references: [id], onDelete: Restrict)
+  fechaAnulacion  DateTime?  @db.Timestamptz(3)
+  motivoAnulacion String?
+
+  @@index([ventaId])
+  @@index([fecha])
+  @@map("pago")
+}
+
+enum EstadoOrden {
+  RECIBIDO
+  EN_DIAGNOSTICO
+  EN_REPARACION
+  LISTO
+  ENTREGADO
+  CANCELADO
+}
+
+model OrdenServicio {
+  id             Int                      @id @default(autoincrement())
+  serie          String                   @db.VarChar(4)
+  numero         Int
+  ventaId        Int                      @unique
+  venta          Venta                    @relation(fields: [ventaId], references: [id])
+  estado         EstadoOrden              @default(RECIBIDO)
+  /// Ej. "Balanza digital de mostrador"
+  equipo         String
+  marca          String?
+  modelo         String?
+  numeroSerie    String?
+  accesorios     String?
+  fallaReportada String
+  diagnostico    String?
+  presupuesto    Decimal?                 @db.Decimal(12, 2)
+  tecnicoId      String?
+  tecnico        User?                    @relation(fields: [tecnicoId], references: [id], onDelete: Restrict)
+  fechaRecepcion DateTime                 @default(now()) @db.Timestamptz(3)
+  fechaPrometida DateTime?                @db.Timestamptz(3)
+  fechaListo     DateTime?                @db.Timestamptz(3)
+  fechaEntrega   DateTime?                @db.Timestamptz(3)
+  garantiaDias   Int?
+  /// Código aleatorio para que el cliente consulte el estado sin iniciar sesión. Se genera al compartir.
+  tokenPublico   String?                  @unique
+  createdAt      DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime                 @updatedAt @db.Timestamptz(3)
+  historial      OrdenServicioHistorial[]
+
+  @@unique([serie, numero])
+  @@index([estado])
+  @@map("orden_servicio")
+}
+
+model OrdenServicioHistorial {
+  id             Int           @id @default(autoincrement())
+  ordenId        Int
+  orden          OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  estadoAnterior EstadoOrden?
+  estadoNuevo    EstadoOrden
+  nota           String?
+  usuarioId      String
+  usuario        User          @relation(fields: [usuarioId], references: [id])
+  fecha          DateTime      @default(now()) @db.Timestamptz(3)
+
+  @@index([ordenId])
+  @@map("orden_servicio_historial")
+}
+
+// ─────────────────────────────────────────────────────────────
+// INVENTARIO
+// ─────────────────────────────────────────────────────────────
+
+enum MotivoAjuste {
+  INVENTARIO_INICIAL
+  CONTEO
+  MERMA
+  ROTURA
+  DEVOLUCION_PROVEEDOR
+  USO_INTERNO
+  OTRO
+}
+
+enum TipoMovimiento {
+  INVENTARIO_INICIAL
+  COMPRA
+  ANULACION_COMPRA
+  VENTA
+  ANULACION_VENTA
+  AJUSTE_ENTRADA
+  AJUSTE_SALIDA
+}
+
+model AjusteInventario {
+  id          Int                    @id @default(autoincrement())
+  motivo      MotivoAjuste
+  observacion String?
+  usuarioId   String
+  usuario     User                   @relation(fields: [usuarioId], references: [id])
+  fecha       DateTime               @default(now()) @db.Timestamptz(3)
+  movimientos MovimientoInventario[]
+
+  @@index([fecha])
+  @@map("ajuste_inventario")
+}
+
+/// Kardex: cada entrada o salida de stock
+model MovimientoInventario {
+  id             Int               @id @default(autoincrement())
+  presentacionId Int
+  presentacion   Presentacion      @relation(fields: [presentacionId], references: [id])
+  tipo           TipoMovimiento
+  /// Positivo = entrada, negativo = salida
+  cantidad       Int
+  stockAnterior  Int
+  stockNuevo     Int
+  costoUnitario  Decimal           @db.Decimal(12, 4)
+  ventaId        Int?
+  venta          Venta?            @relation(fields: [ventaId], references: [id], onDelete: Restrict)
+  compraId       Int?
+  compra         Compra?           @relation(fields: [compraId], references: [id], onDelete: Restrict)
+  ajusteId       Int?
+  ajuste         AjusteInventario? @relation(fields: [ajusteId], references: [id], onDelete: Restrict)
+  usuarioId      String
+  usuario        User              @relation(fields: [usuarioId], references: [id])
+  nota           String?
+  fecha          DateTime          @default(now()) @db.Timestamptz(3)
+
+  @@index([presentacionId, fecha])
+  @@index([tipo])
+  @@map("movimiento_inventario")
+}
