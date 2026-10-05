@@ -5,14 +5,9 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { destinoSeguro } from "@/lib/redirect";
 import { createAction, createPublicAction, ok } from "@/lib/safe-action";
 import { cambiarClaveSchema, loginSchema } from "./schemas";
-
-/** Solo se permiten rutas internas para evitar redirecciones abiertas. */
-function destinoSeguro(redirect: string | undefined): string {
-  if (redirect && redirect.startsWith("/") && !redirect.startsWith("//")) return redirect;
-  return "/";
-}
 
 export const loginAction = createPublicAction({
   schema: loginSchema,

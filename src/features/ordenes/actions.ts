@@ -36,6 +36,7 @@ function revalidarStockYVentas(id: number) {
   revalidatePath("/productos", "layout");
   revalidatePath("/clientes");
   revalidatePath("/cuentas-por-cobrar");
+  revalidatePath("/caja", "layout");
 }
 
 export const guardarOrdenAction = createAction({

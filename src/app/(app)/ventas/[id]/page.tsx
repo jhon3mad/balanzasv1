@@ -46,21 +46,24 @@ export default async function VentaPage({ params }: PageProps<"/ventas/[id]">) {
     entregar: rolTienePermiso(rol, { venta: ["entregar"] }),
     anular: rolTienePermiso(rol, { venta: ["anular"] }),
     crearCliente: rolTienePermiso(rol, { cliente: ["gestionar"] }),
+    devolver: rolTienePermiso(rol, { venta: ["devolver"] }),
   };
   const verUtilidad = rolTienePermiso(rol, { reporte: ["utilidad"] });
 
   const id = paramId((await params).id);
   const [venta, metodos, clientes] = await Promise.all([
     id ? obtenerVenta(id, { verCosto: verUtilidad }) : null,
-    permisos.cobrar ? metodosPagoVenta() : [],
+    permisos.cobrar || permisos.devolver ? metodosPagoVenta() : [],
     permisos.cobrar ? opcionesClientesVenta() : [],
   ]);
   if (!venta) notFound();
 
   const anulada = venta.estado === "ANULADA";
-  const conDescuento = venta.totalLista !== venta.total;
+  const devuelto = venta.lineas.reduce((s, l) => s + aCentimos(l.montoDevuelto), 0);
+  const conDescuento = venta.totalLista !== venta.total && devuelto === 0;
+  // Costo de lo vendido neto (sin lo devuelto)
   const costoTotal = verUtilidad
-    ? venta.lineas.reduce((s, l) => s + Math.round(Number(l.costoUnitario ?? 0) * l.cantidad * 100), 0)
+    ? venta.lineas.reduce((s, l) => s + Math.round(Number(l.costoUnitario ?? 0) * (l.cantidad - l.cantidadDevuelta) * 100), 0)
     : 0;
   const utilidad = aCentimos(venta.total) - costoTotal;
 
@@ -140,11 +143,17 @@ export default async function VentaPage({ params }: PageProps<"/ventas/[id]">) {
                 />
               </>
             )}
+            {devuelto > 0 && (
+              <>
+                <Fila label="Importe vendido" valor={formatPEN(deCentimos(aCentimos(venta.total) + devuelto))} />
+                <Fila label="Devoluciones" valor={`− ${formatPEN(deCentimos(devuelto))}`} />
+              </>
+            )}
             <div className="flex justify-between">
               <span className="text-muted-foreground">Total</span>
               <span className="font-semibold tabular-nums">{formatPEN(venta.total)}</span>
             </div>
-            <Fila label={anulada ? "Pagado (devuelto)" : "Pagado"} valor={formatPEN(venta.montoPagado)} />
+            <Fila label={anulada ? "Pagado (devuelto)" : devuelto > 0 ? "Pagado (sin reembolsos)" : "Pagado"} valor={formatPEN(venta.montoPagado)} />
             <div className="flex justify-between border-t pt-2 text-base">
               <span>Saldo</span>
               <span className={!anulada && Number(venta.saldo) > 0 ? "font-semibold text-destructive tabular-nums" : "font-semibold tabular-nums"}>
@@ -184,18 +193,24 @@ export default async function VentaPage({ params }: PageProps<"/ventas/[id]">) {
                     <div className="font-medium">{l.descripcion}</div>
                     {l.codigo && <div className="font-mono text-xs text-muted-foreground">{l.codigo}</div>}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">{l.cantidad}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {l.cantidad}
+                    {l.cantidadDevuelta > 0 && <div className="text-xs text-destructive">−{l.cantidadDevuelta} devuelta{l.cantidadDevuelta > 1 ? "s" : ""}</div>}
+                  </TableCell>
                   <TableCell className="text-right text-muted-foreground tabular-nums">{formatPEN(l.precioLista)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatPEN(l.precioUnitario)}</TableCell>
                   {verUtilidad && <TableCell className="text-right text-muted-foreground tabular-nums">{formatPEN(l.costoUnitario)}</TableCell>}
-                  <TableCell className="pr-6 text-right tabular-nums">{formatPEN(l.subtotal)}</TableCell>
+                  <TableCell className="pr-6 text-right tabular-nums">
+                    {formatPEN(l.subtotal)}
+                    {Number(l.montoDevuelto) > 0 && <div className="text-xs text-destructive">−{formatPEN(l.montoDevuelto)}</div>}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
             <TableFooter>
               <TableRow>
                 <TableCell colSpan={verUtilidad ? 5 : 4} className="pl-6 text-right font-medium">
-                  Total
+                  {devuelto > 0 ? "Total (sin lo devuelto)" : "Total"}
                 </TableCell>
                 <TableCell className="pr-6 text-right font-semibold tabular-nums">{formatPEN(venta.total)}</TableCell>
               </TableRow>
@@ -203,6 +218,39 @@ export default async function VentaPage({ params }: PageProps<"/ventas/[id]">) {
           </Table>
         </CardContent>
       </Card>
+
+      {venta.devoluciones.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Devoluciones</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            {venta.devoluciones.map((d) => (
+              <div key={d.id} className="grid gap-1 rounded-lg border p-3 text-sm">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="font-medium">
+                    {formatFechaHora(d.fecha)} · {d.usuario}
+                  </span>
+                  <span className="font-semibold tabular-nums">− {formatPEN(d.total)}</span>
+                </div>
+                <ul className="text-muted-foreground">
+                  {d.lineas.map((l, i) => (
+                    <li key={i}>
+                      {l.cantidad} × {l.descripcion} ({formatPEN(l.subtotal)}){!l.reingresaStock && " · dañado, no volvió al stock"}
+                    </li>
+                  ))}
+                </ul>
+                <div className="text-xs text-muted-foreground">
+                  {Number(d.montoReembolso) > 0
+                    ? `Se devolvieron ${formatPEN(d.montoReembolso)} por ${d.metodo}`
+                    : "Sin reembolso: se rebajó del saldo pendiente"}{" "}
+                  · {d.motivo}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

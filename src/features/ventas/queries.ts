@@ -238,6 +238,20 @@ export type LineaVentaDTO = {
   subtotal: string;
   /** Solo se llena para quien puede ver la utilidad */
   costoUnitario: string | null;
+  /** Devoluciones acumuladas de la línea */
+  cantidadDevuelta: number;
+  montoDevuelto: string;
+};
+
+export type DevolucionDTO = {
+  id: number;
+  fecha: string;
+  motivo: string;
+  total: string;
+  montoReembolso: string;
+  metodo: string | null;
+  usuario: string;
+  lineas: { descripcion: string; cantidad: number; subtotal: string; reingresaStock: boolean }[];
 };
 
 export type PagoVentaDTO = {
@@ -295,6 +309,8 @@ export function lineaADTO(d: LineaConCodigo, verCosto: boolean): LineaVentaDTO {
     precioUnitario: texto(d.precioUnitario),
     subtotal: texto(d.subtotal),
     costoUnitario: verCosto ? decimalATexto(d.costoUnitario, 4) : null,
+    cantidadDevuelta: d.cantidadDevuelta,
+    montoDevuelto: texto(d.montoDevuelto),
   };
 }
 
@@ -316,6 +332,7 @@ export type VentaDetalleDTO = VentaListaDTO & {
   motivoAnulacion: string | null;
   lineas: LineaVentaDTO[];
   pagos: PagoVentaDTO[];
+  devoluciones: DevolucionDTO[];
 };
 
 export async function obtenerVenta(id: number, { verCosto }: { verCosto: boolean }): Promise<VentaDetalleDTO | null> {
@@ -329,6 +346,14 @@ export async function obtenerVenta(id: number, { verCosto }: { verCosto: boolean
       detalles: { orderBy: { id: "asc" }, include: { presentacion: { select: { codigo: true } } } },
       pagos: INCLUDE_PAGOS,
       ordenServicio: { select: { id: true, serie: true, numero: true } },
+      devoluciones: {
+        orderBy: { fecha: "asc" },
+        include: {
+          metodoPago: { select: { nombre: true } },
+          usuario: { select: { name: true } },
+          detalles: { include: { ventaDetalle: { select: { descripcion: true } } } },
+        },
+      },
     },
   });
   if (!v || v.estado === "ABIERTA" || v.numero === null) return null;
@@ -362,6 +387,21 @@ export async function obtenerVenta(id: number, { verCosto }: { verCosto: boolean
     motivoAnulacion: v.motivoAnulacion,
     lineas: v.detalles.map((d) => lineaADTO(d, verCosto)),
     pagos: v.pagos.map(pagoADTO),
+    devoluciones: v.devoluciones.map((dv) => ({
+      id: dv.id,
+      fecha: dv.fecha.toISOString(),
+      motivo: dv.motivo,
+      total: texto(dv.total),
+      montoReembolso: texto(dv.montoReembolso),
+      metodo: dv.metodoPago?.nombre ?? null,
+      usuario: dv.usuario.name,
+      lineas: dv.detalles.map((l) => ({
+        descripcion: l.ventaDetalle.descripcion,
+        cantidad: l.cantidad,
+        subtotal: texto(l.subtotal),
+        reingresaStock: l.reingresaStock,
+      })),
+    })),
   };
 }
 

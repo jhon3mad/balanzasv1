@@ -42,6 +42,7 @@ export const TIPOS_MOVIMIENTO = [
   "ANULACION_VENTA",
   "AJUSTE_ENTRADA",
   "AJUSTE_SALIDA",
+  "DEVOLUCION_VENTA",
 ] as const;
 export type TipoMovimiento = (typeof TIPOS_MOVIMIENTO)[number];
 
@@ -53,6 +54,7 @@ export const TIPO_MOVIMIENTO_LABELS: Record<TipoMovimiento, string> = {
   ANULACION_VENTA: "Anulación de venta",
   AJUSTE_ENTRADA: "Ajuste (entrada)",
   AJUSTE_SALIDA: "Ajuste (salida)",
+  DEVOLUCION_VENTA: "Devolución de venta",
 };
 
 export const ESTADOS_STOCK = ["bajo", "agotado", "con-stock"] as const;

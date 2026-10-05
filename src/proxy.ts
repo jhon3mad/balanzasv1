@@ -20,10 +20,9 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (tieneSesion && pathname === "/login") {
-    return NextResponse.redirect(new URL("/", request.url));
-  }
-
+  // No se saca a nadie del login solo por tener cookie: puede estar vencida o revocada
+  // (ej. tras un cambio de clave) y causaría un bucle login ↔ inicio. Si la sesión es
+  // válida, lo decide la página de login consultando la base de datos.
   return NextResponse.next();
 }
 

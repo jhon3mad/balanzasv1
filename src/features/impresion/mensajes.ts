@@ -14,7 +14,9 @@ const primerNombre = (nombre: string | null) => nombre?.trim().split(/\s+/)[0] ?
 
 export function mensajeVenta(venta: VentaDetalleDTO, tienda: Tienda, enlace: string | null): string {
   const nombre = primerNombre(venta.cliente);
-  const lineas = venta.lineas.slice(0, MAX_LINEAS).map((l) => `• ${l.cantidad} x ${l.descripcion} — ${formatPEN(l.subtotal)}`);
+  const lineas = venta.lineas
+    .slice(0, MAX_LINEAS)
+    .map((l) => `• ${l.cantidad} x ${l.descripcion} — ${formatPEN(l.subtotal)}${l.cantidadDevuelta > 0 ? ` (devuelto: ${l.cantidadDevuelta})` : ""}`);
   if (venta.lineas.length > MAX_LINEAS) lineas.push(`• … y ${venta.lineas.length - MAX_LINEAS} más`);
   const saldo = Number(venta.saldo) > 0;
 

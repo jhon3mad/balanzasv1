@@ -16,9 +16,11 @@ export const statements = {
   proveedor: ["ver", "gestionar"],
   compra: ["ver", "crear", "recibir", "pagar", "anular"],
   cliente: ["ver", "gestionar"],
-  venta: ["ver", "crear", "cobrar", "entregar", "anular", "precioBajoMinimo"],
+  venta: ["ver", "crear", "cobrar", "entregar", "anular", "precioBajoMinimo", "devolver"],
   ordenServicio: ["ver", "crear", "actualizar", "anular"],
   reporte: ["ventas", "ventasPropias", "compras", "inventario", "utilidad"],
+  /** operar = abrir, registrar ingresos/retiros y cerrar; historial = ver cajas anteriores */
+  caja: ["operar", "historial"],
 } as const;
 
 export const ac = createAccessControl(statements);
@@ -33,9 +35,10 @@ export const admin = ac.newRole({
   proveedor: ["ver", "gestionar"],
   compra: ["ver", "crear", "recibir", "pagar", "anular"],
   cliente: ["ver", "gestionar"],
-  venta: ["ver", "crear", "cobrar", "entregar", "anular", "precioBajoMinimo"],
+  venta: ["ver", "crear", "cobrar", "entregar", "anular", "precioBajoMinimo", "devolver"],
   ordenServicio: ["ver", "crear", "actualizar", "anular"],
   reporte: ["ventas", "ventasPropias", "compras", "inventario", "utilidad"],
+  caja: ["operar", "historial"],
 });
 
 export const vendedor = ac.newRole({
@@ -45,6 +48,7 @@ export const vendedor = ac.newRole({
   venta: ["ver", "crear", "cobrar", "entregar"],
   ordenServicio: ["ver", "crear", "actualizar"],
   reporte: ["ventasPropias"],
+  caja: ["operar"],
 });
 
 export const almacenero = ac.newRole({

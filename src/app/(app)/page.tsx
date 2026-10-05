@@ -5,7 +5,8 @@ import { Card, CardDescription, CardHeader, CardTitle, CardContent, CardAction }
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { navegacionParaRol } from "@/config/navigation";
-import { hoyLima } from "@/lib/dates";
+import { formatFechaHora, hoyLima } from "@/lib/dates";
+import { cajaAbierta } from "@/features/caja/queries";
 import { formatPEN } from "@/lib/money";
 import { isRol, rolTienePermiso, ROL_LABELS } from "@/lib/permissions";
 import { requireSession } from "@/lib/session";
@@ -26,15 +27,17 @@ export default async function InicioPage() {
     ordenes: rolTienePermiso(rol, { ordenServicio: ["ver"] }),
     stock: rolTienePermiso(rol, { inventario: ["ver"] }),
     compras: rolTienePermiso(rol, { compra: ["ver"] }),
+    caja: rolTienePermiso(rol, { caja: ["operar"] }),
   };
   const hoy = hoyLima();
 
-  const [indicadores, ultimos, ordenes, stock, deuda] = await Promise.all([
+  const [indicadores, ultimos, ordenes, stock, deuda, caja] = await Promise.all([
     ver.ventasHoy ? indicadoresHoy(a.soloPropias ? session.user.id : undefined) : null,
     a.ventas ? ventasUltimosDias(14) : null,
     ver.ordenes ? resumenOrdenes() : null,
     ver.stock ? resumenStock(false) : null,
     ver.compras ? deudaProveedores() : null,
+    ver.caja ? cajaAbierta() : null,
   ]);
 
   const modulos = navegacionParaRol(rol)
@@ -48,6 +51,17 @@ export default async function InicioPage() {
       </PageHeader>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {ver.caja &&
+          (caja ? (
+            <Stat
+              label="Efectivo en caja"
+              valor={formatPEN(caja.resumen.esperado)}
+              detalle={`Abierta desde ${formatFechaHora(caja.fechaApertura)}`}
+              href="/caja/actual"
+            />
+          ) : (
+            <Stat label="Caja" valor="Cerrada" detalle="Ábrela para empezar el día" href="/caja/actual" alerta />
+          ))}
         {indicadores && (
           <>
             <Stat

@@ -81,6 +81,33 @@ export const cambiarClienteVentaSchema = z.object({
   clienteId: z.number().int().positive().nullable(),
 });
 
+/** Devolución parcial: qué se devuelve de cada línea y, si hay reembolso, por qué método. */
+export const devolucionSchema = z
+  .object({
+    ventaId: z.number().int().positive(),
+    motivo: textoRequerido("El motivo", 200),
+    lineas: z
+      .array(
+        z.object({
+          ventaDetalleId: z.number().int().positive(),
+          cantidad: enteroTexto("La cantidad", { max: 10_000 }),
+          /** false = producto dañado: no vuelve al stock vendible */
+          reingresaStock: z.boolean(),
+        }),
+      )
+      .min(1)
+      .max(100),
+    /** Solo si corresponde devolver dinero; null = se decide en el servidor que no hay reembolso */
+    metodoPagoId: z.number().int().positive().nullable(),
+  })
+  .refine((d) => d.lineas.some((l) => l.cantidad > 0), {
+    path: ["lineas"],
+    message: "Indica al menos un producto a devolver",
+  });
+
+export type DevolucionInput = z.input<typeof devolucionSchema>;
+export type DevolucionOutput = z.output<typeof devolucionSchema>;
+
 export const ESTADOS_FILTRO_VENTA = ["EMITIDA", "ANULADA"] as const;
 export const PAGOS_FILTRO_VENTA = ["DEUDA", "PENDIENTE", "PARCIAL", "PAGADO"] as const;
 export const ENTREGAS_FILTRO_VENTA = ["PENDIENTE", "ENTREGADO"] as const;

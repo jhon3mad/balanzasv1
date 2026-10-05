@@ -13,6 +13,7 @@ import {
   TruckIcon,
   UserRoundIcon,
   UsersIcon,
+  WalletIcon,
   WrenchIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -39,6 +40,7 @@ export const NAVEGACION: NavGroup[] = [
     titulo: "Ventas",
     items: [
       { titulo: "Punto de venta", href: "/ventas/nueva", icono: ShoppingCartIcon, permisos: [{ venta: ["crear"] }], disponible: true },
+      { titulo: "Caja", href: "/caja", icono: WalletIcon, permisos: [{ caja: ["operar"] }, { caja: ["historial"] }], disponible: true },
       { titulo: "Ventas", href: "/ventas", icono: ReceiptTextIcon, permisos: [{ venta: ["ver"] }], disponible: true },
       { titulo: "Órdenes de servicio", href: "/servicios", icono: WrenchIcon, permisos: [{ ordenServicio: ["ver"] }], disponible: true },
       { titulo: "Cuentas por cobrar", href: "/cuentas-por-cobrar", icono: HandCoinsIcon, permisos: [{ venta: ["cobrar"] }], disponible: true },

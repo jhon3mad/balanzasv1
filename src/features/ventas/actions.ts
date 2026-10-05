@@ -9,10 +9,19 @@ import {
   anularVentaSchema,
   cambiarClienteVentaSchema,
   cobroSchema,
+  devolucionSchema,
   ventaIdSchema,
   ventaSchema,
 } from "./schemas";
-import { anularPagoVenta, anularVenta, cambiarClienteVenta, crearVenta, marcarEntregada, registrarCobro } from "./service";
+import {
+  anularPagoVenta,
+  anularVenta,
+  cambiarClienteVenta,
+  crearVenta,
+  marcarEntregada,
+  registrarCobro,
+  registrarDevolucion,
+} from "./service";
 
 /** Lo que cambia con cobros y entregas: ventas, saldos de clientes y cuentas por cobrar. */
 function revalidarVenta(id: number) {
@@ -22,6 +31,8 @@ function revalidarVenta(id: number) {
   revalidatePath("/cuentas-por-cobrar");
   // Los adelantos de una orden de servicio se cobran y anulan con estas mismas acciones
   revalidatePath("/servicios", "layout");
+  // El efectivo cobrado entra en el arqueo de la caja abierta
+  revalidatePath("/caja", "layout");
 }
 
 export const emitirVentaAction = createAction({
@@ -37,6 +48,7 @@ export const emitirVentaAction = createAction({
     revalidatePath("/productos", "layout");
     revalidatePath("/clientes");
     revalidatePath("/cuentas-por-cobrar");
+    revalidatePath("/caja", "layout");
     return ok(venta, `Venta ${venta.numero} emitida`);
   },
 });
@@ -79,6 +91,23 @@ export const anularPagoVentaAction = createAction({
     const { ventaId, saldo } = await anularPagoVenta(pagoId, motivo, session.user.id);
     revalidarVenta(ventaId);
     return ok(undefined, `Pago anulado. Saldo pendiente: ${formatPEN(saldo)}`);
+  },
+});
+
+export const devolucionAction = createAction({
+  schema: devolucionSchema,
+  permission: { venta: ["devolver"] },
+  handler: async (datos, { session }) => {
+    const r = await registrarDevolucion(datos, session.user.id);
+    revalidarVenta(datos.ventaId);
+    revalidatePath("/inventario", "layout");
+    revalidatePath("/productos", "layout");
+    revalidatePath("/caja", "layout");
+    const mensaje =
+      Number(r.reembolso) > 0
+        ? `Devolución registrada. Devolver al cliente: ${formatPEN(r.reembolso)}`
+        : `Devolución de ${formatPEN(r.total)} registrada (se rebajó del saldo)`;
+    return ok(r, mensaje);
   },
 });
 

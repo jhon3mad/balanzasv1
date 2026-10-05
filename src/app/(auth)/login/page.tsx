@@ -1,13 +1,21 @@
 import type { Metadata } from "next";
+import { redirect as redirigir } from "next/navigation";
 import { ScaleIcon } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { destinoSeguro } from "@/lib/redirect";
+import { getSession } from "@/lib/session";
 import { getConfiguracion } from "@/features/configuracion/queries";
 import { LoginForm } from "@/features/auth/components/login-form";
 
 export const metadata: Metadata = { title: "Iniciar sesión" };
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
-  const [{ redirect }, config] = await Promise.all([searchParams, getConfiguracion()]);
+  const [{ redirect }, config, session] = await Promise.all([searchParams, getConfiguracion(), getSession()]);
+  const destino = typeof redirect === "string" ? redirect : undefined;
+
+  // Sesión válida (verificada en la base de datos): no tiene sentido mostrar el login.
+  // Con una cookie vencida o revocada, getSession devuelve null y se muestra el formulario.
+  if (session) redirigir(session.user.mustChangePassword ? "/cambiar-clave" : destinoSeguro(destino));
 
   return (
     <Card>
@@ -24,7 +32,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
         <CardDescription>Ingresa con tu usuario y contraseña</CardDescription>
       </CardHeader>
       <CardContent>
-        <LoginForm redirect={typeof redirect === "string" ? redirect : undefined} />
+        <LoginForm redirect={destino} />
       </CardContent>
     </Card>
   );

@@ -14,10 +14,10 @@ const txt = (v: Prisma.Decimal | number | null | undefined) => decimalATexto(v ?
 const porVendedor = (columna: Prisma.Sql, vendedorId?: string) =>
   vendedorId ? Prisma.sql`AND ${columna} = ${vendedorId}` : Prisma.empty;
 
-/** Costo de cada venta (suma de cantidad × costo guardado en cada línea). */
+/** Costo de cada venta: cantidad neta (sin lo devuelto) × costo guardado en cada línea. */
 const COSTO_POR_VENTA = Prisma.sql`
   LEFT JOIN (
-    SELECT "ventaId", SUM(cantidad * "costoUnitario") AS costo FROM "venta_detalle" GROUP BY "ventaId"
+    SELECT "ventaId", SUM((cantidad - "cantidadDevuelta") * "costoUnitario") AS costo FROM "venta_detalle" GROUP BY "ventaId"
   ) c ON c."ventaId" = v.id`;
 
 // ───────────────────────────── Ventas ─────────────────────────────
@@ -90,14 +90,22 @@ export type CobroMetodo = { metodo: string; pagos: number; monto: string };
 
 /**
  * Dinero recibido en el periodo por método de pago (incluye cobros de saldo y adelantos
- * de órdenes). Con vendedor: lo que ese usuario cobró.
+ * de órdenes), menos lo reembolsado en devoluciones. Con vendedor: lo que ese usuario movió.
  */
 export async function cobrosPorMetodo(p: Periodo, usuarioId?: string): Promise<CobroMetodo[]> {
   const filas = await prisma.$queryRaw<{ metodo: string; pagos: number; monto: Prisma.Decimal }[]>`
-    SELECT m.nombre AS metodo, COUNT(*)::int AS pagos, SUM(pg.monto) AS monto
-    FROM "pago" pg JOIN "metodo_pago" m ON m.id = pg."metodoPagoId"
-    WHERE NOT pg.anulado AND pg.fecha >= ${p.gte} AND pg.fecha < ${p.lt}
-      ${porVendedor(Prisma.sql`pg."usuarioId"`, usuarioId)}
+    SELECT m.nombre AS metodo, SUM(t.pagos)::int AS pagos, SUM(t.monto) AS monto
+    FROM (
+      SELECT pg."metodoPagoId" AS metodo_id, 1 AS pagos, pg.monto
+      FROM "pago" pg
+      WHERE NOT pg.anulado AND pg.fecha >= ${p.gte} AND pg.fecha < ${p.lt}
+        ${porVendedor(Prisma.sql`pg."usuarioId"`, usuarioId)}
+      UNION ALL
+      SELECT dv."metodoPagoId", 0, -dv."montoReembolso"
+      FROM "devolucion" dv
+      WHERE dv."montoReembolso" > 0 AND dv.fecha >= ${p.gte} AND dv.fecha < ${p.lt}
+        ${porVendedor(Prisma.sql`dv."usuarioId"`, usuarioId)}
+    ) t JOIN "metodo_pago" m ON m.id = t.metodo_id
     GROUP BY m.id, m.nombre, m.orden ORDER BY m.orden, m.nombre`;
   return filas.map((f) => ({ ...f, monto: txt(f.monto) }));
 }
@@ -124,7 +132,7 @@ export async function listadoVentas(p: Periodo, vendedorId?: string): Promise<Ve
     include: {
       cliente: { select: { nombre: true } },
       vendedor: { select: { name: true } },
-      detalles: { select: { cantidad: true, costoUnitario: true } },
+      detalles: { select: { cantidad: true, cantidadDevuelta: true, costoUnitario: true } },
     },
   });
   return ventas.map((v) => ({
@@ -134,7 +142,7 @@ export async function listadoVentas(p: Periodo, vendedorId?: string): Promise<Ve
     vendedor: v.vendedor.name,
     tipo: v.tipo === "SERVICIO" ? "Servicio" : "Venta",
     total: txt(v.total),
-    costo: txt(v.detalles.reduce((s, d) => s.add(d.costoUnitario.mul(d.cantidad)), new Prisma.Decimal(0))),
+    costo: txt(v.detalles.reduce((s, d) => s.add(d.costoUnitario.mul(d.cantidad - d.cantidadDevuelta)), new Prisma.Decimal(0))),
     pagado: txt(v.montoPagado),
     saldo: txt(v.saldo),
     estado: v.estado === "ANULADA" ? "Anulada" : v.estadoPago === "PAGADO" ? "Pagada" : v.estadoPago === "PARCIAL" ? "Pago parcial" : "Sin pagar",
@@ -162,8 +170,8 @@ export async function masVendidos(p: Periodo, orden: "importe" | "cantidad", lim
     SELECT d."tipoItem" AS tipo,
            COALESCE(MAX(p.nombre || CASE WHEN pr.nombre = 'Estándar' THEN '' ELSE ' — ' || pr.nombre END), MAX(s.nombre), MAX(d.descripcion)) AS descripcion,
            MAX(pr.codigo) AS codigo,
-           SUM(d.cantidad)::int AS cantidad, COUNT(DISTINCT v.id)::int AS ventas,
-           SUM(d.subtotal) AS total, SUM(d.cantidad * d."costoUnitario") AS costo
+           SUM(d.cantidad - d."cantidadDevuelta")::int AS cantidad, COUNT(DISTINCT v.id)::int AS ventas,
+           SUM(d.subtotal - d."montoDevuelto") AS total, SUM((d.cantidad - d."cantidadDevuelta") * d."costoUnitario") AS costo
     FROM "venta_detalle" d
     JOIN "venta" v ON v.id = d."ventaId"
     LEFT JOIN "presentacion" pr ON pr.id = d."presentacionId"
@@ -171,6 +179,7 @@ export async function masVendidos(p: Periodo, orden: "importe" | "cantidad", lim
     LEFT JOIN "servicio" s ON s.id = d."servicioId"
     WHERE v.estado = 'EMITIDA' AND v."fechaEmision" >= ${p.gte} AND v."fechaEmision" < ${p.lt}
     GROUP BY d."tipoItem", d."presentacionId", d."servicioId"
+    HAVING SUM(d.cantidad - d."cantidadDevuelta") > 0
     ORDER BY ${ordenSql}
     LIMIT ${limite}`;
   return filas.map((f) => ({ ...f, total: txt(f.total), costo: txt(f.costo) }));

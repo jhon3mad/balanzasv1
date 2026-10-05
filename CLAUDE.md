@@ -13,7 +13,7 @@ Next.js 16 (App Router, `src/proxy.ts` en lugar de middleware) · React 19 + Rea
 npm run dev                      # desarrollo (puerto 3000; el usuario suele tenerlo abierto)
 npx tsc --noEmit                 # tipos
 npx eslint src                   # lint (debe quedar en 0 errores y 0 warnings)
-npm run build                    # build de producción
+npm run build                    # build de producción (incluye prisma generate, necesario en Vercel)
 npx next typegen                 # regenera tipos de rutas (PageProps<"/ruta">) tras crear páginas
 npx prisma migrate dev --name x  # migración; con Prisma 7 luego hay que ejecutar:
 npx prisma generate              # (migrate dev ya no genera el cliente)
@@ -61,6 +61,7 @@ prisma/schema.prisma            esquema completo (todas las tablas ya existen, i
 - Componentes: `FormField`, `MoneyInput`/`UnitInput`, `SelectField` (`""` = vacío) y `PresentacionPicker` (combobox de productos).
 - `useFieldArray` siempre con `keyName: "key"`, para no pisar el `id` real de cada línea.
 - Usar `useWatch` en lugar de `form.watch` (lo exige el React Compiler).
+- **Listas de productos editables (se usan desde el celular):** no usar `<Table>` con inputs. Usar una sola versión con `@container`: en angosto, tarjeta con los campos uno debajo de otro; en ancho, grid tipo tabla (`@xl:`/`@4xl:`/`@5xl:grid-cols-[…]` y envoltorios `@…:contents`). Ver `punto-venta.tsx`, `compra-form.tsx` y `ajuste-form.tsx`. Las clases de columnas deben escribirse completas (Tailwind no detecta clases armadas en tiempo de ejecución).
 
 ### Números
 - Los números de los formularios viajan como **string**: `decimalTexto`, `enteroTexto` y sus variantes opcionales en `src/lib/validation.ts`.
@@ -91,6 +92,7 @@ prisma/schema.prisma            esquema completo (todas las tablas ya existen, i
 - **No se borra historial:** lo que tiene movimientos se desactiva (`activo`) o se anula con motivo, y queda en `registrarAuditoria`.
 - **Relaciones opcionales:** en el esquema llevan `onDelete: Restrict`. Prisma pone `SET NULL` por defecto, lo que causó un bug.
 - **Botón que renderiza un enlace:** `<Button nativeButton={false} render={<Link href=… />}>`.
+- **`proxy.ts` solo ve si EXISTE la cookie de sesión, no si es válida** (no consulta la BD). Nunca redirigir *desde* el login por tener cookie: una cookie revocada causa un bucle login ↔ inicio. La validez la decide `getSession()` en las páginas (el login redirige solo si la sesión es válida).
 
 ## Pruebas (importante: no tocar los datos del usuario)
 - No hay suite automatizada. Cada módulo se valida con un script temporal `prisma/_e2eN.ts` que se ejecuta con `npx tsx` y se borra al terminar. Ese script:
@@ -111,7 +113,10 @@ prisma/schema.prisma            esquema completo (todas las tablas ya existen, i
   - **el cliente es obligatorio** si queda saldo o no se entrega en el acto; si no, va "Cliente general" (`clienteId` null);
   - los pagos mixtos son varias filas `Pago`; el vuelto se calcula con `montoRecibido` y solo aplica a efectivo;
   - la boleta B001 se asigna en la misma transacción.
-- **Orden de servicio** (pendiente): es una `Venta` de tipo `SERVICIO`, en estado `ABIERTA` hasta emitirse, más la tabla 1:1 `OrdenServicio`.
+- **Orden de servicio:** es una `Venta` de tipo `SERVICIO`, en estado `ABIERTA` hasta emitirse, más la tabla 1:1 `OrdenServicio`.
+- **Devoluciones:** lo vendido neto de una línea es `cantidad − cantidadDevuelta` (y `subtotal − montoDevuelto`); toda consulta de cantidades, utilidad o "más vendidos" debe usar los netos. El dinero recibido resta `Devolucion.montoReembolso`.
+- **Caja:** el efectivo esperado se calcula por ventana de tiempo (apertura → cierre) sobre `pago` y `devolucion`; no hay `cajaId` en los pagos.
+- **Base de datos compartida:** el sistema publicado en Vercel usa la misma BD de Neon que el desarrollo. Las migraciones se aplican a producción en el acto: deben ser solo aditivas (nada que rompa el código ya desplegado).
 - **Permisos por rol:**
   - **Almacenero:** ve costos, compra, recibe y ajusta inventario. No vende ni crea productos.
   - **Vendedor:** vende, cobra y gestiona clientes. No ve costos.

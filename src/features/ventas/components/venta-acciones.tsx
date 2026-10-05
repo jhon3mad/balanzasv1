@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { BanIcon, HandCoinsIcon, PackageCheckIcon, UserRoundPenIcon } from "lucide-react";
+import { BanIcon, HandCoinsIcon, PackageCheckIcon, Undo2Icon, UserRoundPenIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/data/confirm-dialog";
 import { MotivoDialog } from "@/components/data/motivo-dialog";
@@ -10,8 +10,9 @@ import { anularVentaAction, entregarVentaAction } from "../actions";
 import type { ClienteVentaOpcion, MetodoPagoVenta, VentaDetalleDTO } from "../queries";
 import { CambiarClienteDialog } from "./cambiar-cliente-dialog";
 import { CobroDialog } from "./cobro-dialog";
+import { DevolucionDialog } from "./devolucion-dialog";
 
-type Permisos = { cobrar: boolean; entregar: boolean; anular: boolean; crearCliente: boolean };
+type Permisos = { cobrar: boolean; entregar: boolean; anular: boolean; crearCliente: boolean; devolver: boolean };
 
 export function VentaAcciones({
   venta,
@@ -24,20 +25,29 @@ export function VentaAcciones({
   clientes: ClienteVentaOpcion[];
   permisos: Permisos;
 }) {
-  const [dialogo, setDialogo] = useState<"cobrar" | "entregar" | "cliente" | "anular" | null>(null);
+  const [dialogo, setDialogo] = useState<"cobrar" | "entregar" | "cliente" | "anular" | "devolucion" | null>(null);
   const cerrar = () => setDialogo(null);
   if (venta.estado !== "EMITIDA") return null;
 
   const conSaldo = Number(venta.saldo) > 0;
   const porEntregar = venta.estadoEntrega === "PENDIENTE";
   const pagado = Number(venta.montoPagado) > 0;
+  const conDevoluciones = venta.devoluciones.length > 0;
+  const devolvible = venta.tipo === "VENTA" && venta.lineas.some((l) => l.tipoItem === "PRODUCTO" && l.cantidad > l.cantidadDevuelta);
 
   return (
     <>
-      {permisos.anular && venta.tipo === "VENTA" && (
+      {/* Con devoluciones ya no se anula: el resto se revierte con otra devolución */}
+      {permisos.anular && venta.tipo === "VENTA" && !conDevoluciones && (
         <Button variant="outline" onClick={() => setDialogo("anular")}>
           <BanIcon />
           Anular
+        </Button>
+      )}
+      {permisos.devolver && devolvible && (
+        <Button variant="outline" onClick={() => setDialogo("devolucion")}>
+          <Undo2Icon />
+          Devolución
         </Button>
       )}
       {permisos.cobrar && (
@@ -60,6 +70,7 @@ export function VentaAcciones({
       )}
 
       {dialogo === "cobrar" && <CobroDialog venta={venta} metodos={metodos} onClose={cerrar} />}
+      {dialogo === "devolucion" && <DevolucionDialog venta={venta} metodos={metodos} onClose={cerrar} />}
       {dialogo === "cliente" && (
         <CambiarClienteDialog
           venta={venta}

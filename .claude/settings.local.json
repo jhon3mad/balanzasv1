@@ -28,7 +28,18 @@
       "PowerShell($u = \\(Get-Content .env | Where-Object { $_ -match '^BETTER_AUTH_URL=' }\\) -replace '^BETTER_AUTH_URL=','' -replace '\"',''; \"BETTER_AUTH_URL=$u\"; Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object LocalPort, OwningProcess)",
       "PowerShell(npm start)",
       "Skill(update-config)",
-      "Skill(update-config:*)"
+      "Skill(update-config:*)",
+      "Bash(mkdir -p prisma/migrations/20261006000000_caja_devoluciones)",
+      "Bash(npx prisma *)",
+      "PowerShell(npx next typegen)",
+      "PowerShell(npx eslint src)",
+      "PowerShell(while \\(-not \\(Select-String -Path \"C:\\\\Users\\\\jhon\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--informatica-pruebas-ventas-nextjspostgresql-ias-opus55-venta1\\\\72240ebd-0f82-4825-b9a4-1201bcf00717\\\\tasks\\\\bqus0rj56.output\" -Pattern \"build exit\" -Quiet\\)\\) { Start-Sleep -Seconds 5 }; Get-Content \"C:\\\\Users\\\\jhon\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--informatica-pruebas-ventas-nextjspostgresql-ias-opus55-venta1\\\\72240ebd-0f82-4825-b9a4-1201bcf00717\\\\tasks\\\\bqus0rj56.output\")",
+      "PowerShell(npx next start -p 3100)",
+      "PowerShell(for \\($i = 0; $i -lt 20; $i++\\) { try { $r = Invoke-WebRequest -Uri http://localhost:3100/login -UseBasicParsing -TimeoutSec 5; \"OK $\\($r.StatusCode\\)\"; break } catch { Start-Sleep -Seconds 2 } }; npx tsx prisma/_e2e11.ts)",
+      "PowerShell(npx tsx prisma/_e2e11.ts)",
+      "PowerShell($p = Get-NetTCPConnection -LocalPort 3100 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique; foreach \\($id in $p\\) { Stop-Process -Id $id -Force -Confirm:$false }; Remove-Item prisma/_e2e11.ts -Confirm:$false; \"script: $\\(Test-Path prisma/_e2e11.ts\\)\"; \"3100: $\\(\\(Get-NetTCPConnection -LocalPort 3100 -State Listen -ErrorAction SilentlyContinue | Measure-Object\\).Count\\)\")",
+      "PowerShell(for \\($i = 0; $i -lt 20; $i++\\) { try { $r = Invoke-WebRequest -Uri http://localhost:3100/login -UseBasicParsing -TimeoutSec 5; \"OK $\\($r.StatusCode\\)\"; break } catch { Start-Sleep -Seconds 2 } }; npx tsx prisma/_e2e12.ts)",
+      "PowerShell($p = Get-NetTCPConnection -LocalPort 3100 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique; foreach \\($id in $p\\) { Stop-Process -Id $id -Force -Confirm:$false }; Remove-Item prisma/_e2e12.ts -Confirm:$false; \"script: $\\(Test-Path prisma/_e2e12.ts\\)\"; \"3100: $\\(\\(Get-NetTCPConnection -LocalPort 3100 -State Listen -ErrorAction SilentlyContinue | Measure-Object\\).Count\\)\")"
     ]
   }
 }

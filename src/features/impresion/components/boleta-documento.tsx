@@ -27,7 +27,9 @@ export function BoletaDocumento({ venta, config, formato }: Props) {
   const ticket = esTicket(formato);
   const anulada = venta.estado === "ANULADA";
   const pagos = venta.pagos.filter((p) => !p.anulado);
-  const descuento = aCentimos(venta.descuento);
+  const devuelto = venta.lineas.reduce((s, l) => s + aCentimos(l.montoDevuelto), 0);
+  // Con devoluciones se muestra importe − devoluciones en lugar del descuento
+  const descuento = devuelto > 0 ? 0 : aCentimos(venta.descuento);
   const vuelto = pagos.reduce((s, p) => s + (p.montoRecibido ? aCentimos(p.montoRecibido) - aCentimos(p.monto) : 0), 0);
 
   return (
@@ -81,7 +83,10 @@ export function BoletaDocumento({ venta, config, formato }: Props) {
         <div className="grid gap-1">
           {venta.lineas.map((l) => (
             <div key={l.id}>
-              <div>{l.descripcion}</div>
+              <div>
+                {l.descripcion}
+                {l.cantidadDevuelta > 0 && ` (devuelto: ${l.cantidadDevuelta})`}
+              </div>
               <div className="flex justify-between gap-2 tabular-nums">
                 <span>
                   {l.cantidad} x {formatPEN(l.precioUnitario)}
@@ -108,6 +113,7 @@ export function BoletaDocumento({ venta, config, formato }: Props) {
                 <td className="py-1 pr-2">
                   {l.descripcion}
                   {l.codigo && <span className="text-xs text-black/60"> · {l.codigo}</span>}
+                  {l.cantidadDevuelta > 0 && <span className="text-xs"> (devuelto: {l.cantidadDevuelta})</span>}
                 </td>
                 <td className="py-1 pr-2 text-right tabular-nums">{formatPEN(l.precioUnitario)}</td>
                 <td className="py-1 text-right tabular-nums">{formatPEN(l.subtotal)}</td>
@@ -124,6 +130,12 @@ export function BoletaDocumento({ venta, config, formato }: Props) {
           <>
             <Linea label="Precio de lista" valor={formatPEN(venta.totalLista)} />
             <Linea label="Descuento" valor={`-${formatPEN(venta.descuento)}`} />
+          </>
+        )}
+        {devuelto > 0 && (
+          <>
+            <Linea label="Importe" valor={formatPEN(deCentimos(aCentimos(venta.total) + devuelto))} />
+            <Linea label="Devoluciones" valor={`-${formatPEN(deCentimos(devuelto))}`} />
           </>
         )}
         <Linea label="TOTAL" valor={formatPEN(venta.total)} fuerte />

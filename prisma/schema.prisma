@@ -51,6 +51,10 @@ model User {
   ajustesInventario     AjusteInventario[]
   movimientosInventario MovimientoInventario[]
   auditorias            Auditoria[]
+  cajasAbiertas         Caja[]                   @relation("CajaAbiertaPor")
+  cajasCerradas         Caja[]                   @relation("CajaCerradaPor")
+  movimientosCaja       MovimientoCaja[]
+  devoluciones          Devolucion[]
 
   @@map("user")
 }
@@ -221,6 +225,7 @@ model MetodoPago {
   updatedAt          DateTime     @updatedAt @db.Timestamptz(3)
   pagos              Pago[]
   pagosCompra        PagoCompra[]
+  devoluciones       Devolucion[]
 
   @@map("metodo_pago")
 }
@@ -542,6 +547,7 @@ model Venta {
   pagos           Pago[]
   ordenServicio   OrdenServicio?
   movimientos     MovimientoInventario[]
+  devoluciones    Devolucion[]
 
   @@unique([serie, numero])
   @@index([fechaEmision])
@@ -571,6 +577,10 @@ model VentaDetalle {
   /// Copia del costo promedio al momento de la venta (0 en servicios)
   costoUnitario  Decimal       @default(0) @db.Decimal(12, 4)
   subtotal       Decimal       @db.Decimal(12, 2)
+  /// Devoluciones parciales acumuladas: lo vendido neto es cantidad − cantidadDevuelta
+  cantidadDevuelta Int                 @default(0)
+  montoDevuelto    Decimal             @default(0) @db.Decimal(12, 2)
+  devoluciones     DevolucionDetalle[]
 
   @@index([ventaId])
   @@index([presentacionId])
@@ -683,6 +693,7 @@ enum TipoMovimiento {
   ANULACION_VENTA
   AJUSTE_ENTRADA
   AJUSTE_SALIDA
+  DEVOLUCION_VENTA
 }
 
 model AjusteInventario {
@@ -715,6 +726,8 @@ model MovimientoInventario {
   compra         Compra?           @relation(fields: [compraId], references: [id], onDelete: Restrict)
   ajusteId       Int?
   ajuste         AjusteInventario? @relation(fields: [ajusteId], references: [id], onDelete: Restrict)
+  devolucionId   Int?
+  devolucion     Devolucion?       @relation(fields: [devolucionId], references: [id], onDelete: Restrict)
   usuarioId      String
   usuario        User              @relation(fields: [usuarioId], references: [id])
   nota           String?
@@ -723,4 +736,103 @@ model MovimientoInventario {
   @@index([presentacionId, fecha])
   @@index([tipo])
   @@map("movimiento_inventario")
+}
+
+// ─────────────────────────────────────────────────────────────
+// DEVOLUCIONES (parciales, de ventas emitidas)
+// ─────────────────────────────────────────────────────────────
+
+/// Devolución de parte de los productos de una venta. Rebaja el total de la venta;
+/// si lo ya pagado supera el nuevo total, la diferencia se reembolsa al cliente.
+model Devolucion {
+  id             Int                    @id @default(autoincrement())
+  ventaId        Int
+  venta          Venta                  @relation(fields: [ventaId], references: [id])
+  motivo         String
+  /// Importe devuelto (precio cobrado × cantidad)
+  total          Decimal                @db.Decimal(12, 2)
+  /// Dinero entregado al cliente (0 si solo se rebajó el saldo pendiente)
+  montoReembolso Decimal                @default(0) @db.Decimal(12, 2)
+  metodoPagoId   Int?
+  metodoPago     MetodoPago?            @relation(fields: [metodoPagoId], references: [id], onDelete: Restrict)
+  usuarioId      String
+  usuario        User                   @relation(fields: [usuarioId], references: [id])
+  fecha          DateTime               @default(now()) @db.Timestamptz(3)
+  detalles       DevolucionDetalle[]
+  movimientos    MovimientoInventario[]
+
+  @@index([ventaId])
+  @@index([fecha])
+  @@map("devolucion")
+}
+
+model DevolucionDetalle {
+  id             Int          @id @default(autoincrement())
+  devolucionId   Int
+  devolucion     Devolucion   @relation(fields: [devolucionId], references: [id], onDelete: Cascade)
+  ventaDetalleId Int
+  ventaDetalle   VentaDetalle @relation(fields: [ventaDetalleId], references: [id])
+  cantidad       Int
+  subtotal       Decimal      @db.Decimal(12, 2)
+  /// false = producto dañado: no vuelve al stock vendible
+  reingresaStock Boolean      @default(true)
+
+  @@index([devolucionId])
+  @@index([ventaDetalleId])
+  @@map("devolucion_detalle")
+}
+
+// ─────────────────────────────────────────────────────────────
+// CAJA (turnos con arqueo de efectivo)
+// ─────────────────────────────────────────────────────────────
+
+enum EstadoCaja {
+  ABIERTA
+  CERRADA
+}
+
+enum TipoMovimientoCaja {
+  INGRESO
+  EGRESO
+}
+
+/// Turno de caja: se abre con un fondo inicial y se cierra contando el efectivo.
+/// Solo puede haber una abierta a la vez (índice parcial único en la migración).
+model Caja {
+  id               Int              @id @default(autoincrement())
+  estado           EstadoCaja       @default(ABIERTA)
+  montoInicial     Decimal          @db.Decimal(12, 2)
+  fechaApertura    DateTime         @default(now()) @db.Timestamptz(3)
+  abiertaPorId     String
+  abiertaPor       User             @relation("CajaAbiertaPor", fields: [abiertaPorId], references: [id])
+  fechaCierre      DateTime?        @db.Timestamptz(3)
+  cerradaPorId     String?
+  cerradaPor       User?            @relation("CajaCerradaPor", fields: [cerradaPorId], references: [id], onDelete: Restrict)
+  /// Foto al cerrar (lo que debía haber, lo contado y la diferencia)
+  efectivoEsperado Decimal?         @db.Decimal(12, 2)
+  efectivoContado  Decimal?         @db.Decimal(12, 2)
+  diferencia       Decimal?         @db.Decimal(12, 2)
+  /// Totales por método y conceptos al cerrar, para el historial
+  resumen          Json?
+  observaciones    String?
+  movimientos      MovimientoCaja[]
+
+  @@index([fechaApertura])
+  @@map("caja")
+}
+
+/// Ingresos y retiros de efectivo que no son ventas (ej. compra de útiles, sencillo).
+model MovimientoCaja {
+  id        Int                @id @default(autoincrement())
+  cajaId    Int
+  caja      Caja               @relation(fields: [cajaId], references: [id])
+  tipo      TipoMovimientoCaja
+  monto     Decimal            @db.Decimal(12, 2)
+  concepto  String
+  usuarioId String
+  usuario   User               @relation(fields: [usuarioId], references: [id])
+  fecha     DateTime           @default(now()) @db.Timestamptz(3)
+
+  @@index([cajaId])
+  @@map("movimiento_caja")
 }

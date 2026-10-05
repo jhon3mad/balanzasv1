@@ -6,7 +6,7 @@ import { registrarAuditoria } from "@/lib/auditoria";
 import { formatearNumero, siguienteNumero } from "@/lib/correlativo";
 import { estadoPagoDe } from "@/lib/estados";
 import { bloquearPresentacion, nuevoCostoPromedio } from "@/lib/stock";
-import type { CobroOutput, VentaOutput } from "./schemas";
+import type { CobroOutput, DevolucionOutput, VentaOutput } from "./schemas";
 
 type Tx = Prisma.TransactionClient;
 const D = Prisma.Decimal;
@@ -327,6 +327,9 @@ export async function anularPagoVenta(pagoId: number, motivo: string, usuarioId:
     if (venta.pagos.find((p) => p.id === pagoId)?.anulado) throw new AppError("El pago ya estaba anulado.");
 
     const montoPagado = venta.montoPagado.sub(pago.monto);
+    if (montoPagado.lt(0)) {
+      throw new AppError("No se puede anular este pago: parte de él ya se reembolsó al cliente en una devolución.");
+    }
     const saldo = venta.total.sub(montoPagado);
     if (saldo.gt(0) && !venta.clienteId) {
       throw new AppError(
@@ -365,6 +368,9 @@ export async function anularVenta(ventaId: number, motivo: string, usuarioId: st
     const venta = await bloquearVenta(tx, ventaId);
     if (venta.estado === "ANULADA") throw new AppError("La venta ya estaba anulada.");
     if (venta.tipo !== "VENTA") throw new AppError("La anulación de boletas de órdenes de servicio aún no está disponible.");
+    if (venta.detalles.some((l) => l.cantidadDevuelta > 0)) {
+      throw new AppError("La venta tiene devoluciones registradas. Para revertir el resto, registra una devolución de lo que queda.");
+    }
 
     // Bloqueo en orden de id (igual que al vender) para evitar bloqueos cruzados
     const lineas = venta.detalles
@@ -418,5 +424,136 @@ export async function anularVenta(ventaId: number, motivo: string, usuarioId: st
       tx,
     );
     return { numero: venta.numeroTexto, devolver };
+  }, OPCIONES_TX);
+}
+
+/**
+ * Devolución parcial de productos. Rebaja el total de la venta; si lo pagado supera el
+ * nuevo total, la diferencia se reembolsa al cliente (y, en efectivo, sale de la caja).
+ * Lo que vuelve en buen estado reingresa al stock (kardex DEVOLUCION_VENTA, al costo con
+ * que salió); lo dañado no.
+ */
+export async function registrarDevolucion(d: DevolucionOutput, usuarioId: string) {
+  return prisma.$transaction(async (tx) => {
+    const venta = await bloquearVenta(tx, d.ventaId);
+    if (venta.estado !== "EMITIDA") throw new AppError("Solo se puede devolver de ventas emitidas.");
+    if (venta.tipo !== "VENTA") throw new AppError("Las boletas de órdenes de servicio no admiten devoluciones.");
+
+    const lineas = d.lineas
+      .filter((l) => l.cantidad > 0)
+      .map((l) => {
+        const det = venta.detalles.find((x) => x.id === l.ventaDetalleId);
+        if (!det) throw new AppError("Uno de los productos no pertenece a esta venta.");
+        if (det.tipoItem !== "PRODUCTO" || !det.presentacionId) throw new AppError(`"${det.descripcion}" no es un producto.`);
+        const disponible = det.cantidad - det.cantidadDevuelta;
+        if (l.cantidad > disponible) {
+          throw new AppError(`De "${det.descripcion}" solo se pueden devolver ${disponible}.`);
+        }
+        // Si se devuelve todo lo que queda, se usa el saldo exacto de la línea (evita céntimos sueltos)
+        const subtotal =
+          l.cantidad === disponible ? det.subtotal.sub(det.montoDevuelto) : det.precioUnitario.mul(l.cantidad).toDecimalPlaces(2);
+        return { det, cantidad: l.cantidad, subtotal, reingresaStock: l.reingresaStock };
+      });
+    if (lineas.length === 0) throw new AppError("Indica al menos un producto a devolver.");
+
+    const totalDevuelto = lineas.reduce((s, l) => s.add(l.subtotal), new D(0));
+    if (totalDevuelto.lte(0)) throw new AppError("Lo devuelto no tiene importe.");
+    const nuevoTotal = venta.total.sub(totalDevuelto);
+    const totalLista = venta.totalLista.sub(lineas.reduce((s, l) => s.add(l.det.precioLista.mul(l.cantidad)), new D(0))).toDecimalPlaces(2);
+    // Lo pagado por encima del nuevo total se devuelve en dinero
+    const reembolso = D.max(venta.montoPagado.sub(nuevoTotal), 0);
+    const montoPagado = venta.montoPagado.sub(reembolso);
+
+    let metodoPagoId: number | null = null;
+    if (reembolso.gt(0)) {
+      if (!d.metodoPagoId) throw new AppError("Indica cómo se devuelve el dinero al cliente.");
+      const metodo = await tx.metodoPago.findUnique({ where: { id: d.metodoPagoId } });
+      if (!metodo?.activo) throw new AppError("El método de pago no existe o está desactivado.");
+      metodoPagoId = metodo.id;
+    }
+
+    const devolucion = await tx.devolucion.create({
+      data: {
+        ventaId: venta.id,
+        motivo: d.motivo,
+        total: totalDevuelto,
+        montoReembolso: reembolso,
+        metodoPagoId,
+        usuarioId,
+        detalles: {
+          create: lineas.map((l) => ({
+            ventaDetalleId: l.det.id,
+            cantidad: l.cantidad,
+            subtotal: l.subtotal,
+            reingresaStock: l.reingresaStock,
+          })),
+        },
+      },
+    });
+
+    for (const l of lineas) {
+      await tx.ventaDetalle.update({
+        where: { id: l.det.id },
+        data: { cantidadDevuelta: { increment: l.cantidad }, montoDevuelto: { increment: l.subtotal } },
+      });
+    }
+    await tx.venta.update({
+      where: { id: venta.id },
+      data: {
+        total: nuevoTotal,
+        totalLista,
+        descuento: totalLista.sub(nuevoTotal),
+        montoPagado,
+        saldo: nuevoTotal.sub(montoPagado),
+        estadoPago: nuevoTotal.eq(0) ? "PAGADO" : estadoPagoDe(nuevoTotal.toString(), montoPagado.toString()),
+      },
+    });
+
+    // Stock: bloqueo en orden de id, igual que al vender
+    const aReingresar = lineas.filter((l) => l.reingresaStock).sort((a, b) => a.det.presentacionId! - b.det.presentacionId!);
+    for (const l of aReingresar) {
+      const actual = await bloquearPresentacion(tx, l.det.presentacionId!);
+      const stockNuevo = actual.stock + l.cantidad;
+      await tx.presentacion.update({
+        where: { id: l.det.presentacionId! },
+        data: {
+          stock: stockNuevo,
+          costoPromedio: nuevoCostoPromedio(actual.stock, actual.costoPromedio, l.cantidad, l.det.costoUnitario),
+        },
+      });
+      await tx.movimientoInventario.create({
+        data: {
+          presentacionId: l.det.presentacionId!,
+          tipo: "DEVOLUCION_VENTA",
+          cantidad: l.cantidad,
+          stockAnterior: actual.stock,
+          stockNuevo,
+          costoUnitario: l.det.costoUnitario,
+          ventaId: venta.id,
+          devolucionId: devolucion.id,
+          usuarioId,
+          nota: `Devolución ${venta.numeroTexto}`,
+        },
+      });
+    }
+
+    await registrarAuditoria(
+      {
+        usuarioId,
+        accion: "DEVOLUCION_VENTA",
+        entidad: "venta",
+        entidadId: venta.id,
+        datos: {
+          numero: venta.numeroTexto,
+          devolucionId: devolucion.id,
+          total: totalDevuelto.toFixed(2),
+          reembolso: reembolso.toFixed(2),
+          motivo: d.motivo,
+          sinReingreso: lineas.filter((l) => !l.reingresaStock).map((l) => ({ descripcion: l.det.descripcion, cantidad: l.cantidad })),
+        },
+      },
+      tx,
+    );
+    return { numero: venta.numeroTexto, total: totalDevuelto.toFixed(2), reembolso: reembolso.toFixed(2) };
   }, OPCIONES_TX);
 }

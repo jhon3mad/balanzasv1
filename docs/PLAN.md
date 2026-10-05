@@ -77,7 +77,24 @@
 - [x] Exportar a Excel (.xlsx con `exceljs`, `src/lib/excel.ts`): `/api/reportes/{ventas|productos|compras|inventario|cuentas-por-cobrar}` con el mismo control de permisos, fila de totales con fórmulas y fechas en hora de Lima
 - Agregación por día en SQL con `AT TIME ZONE 'America/Lima'`; la utilidad usa el costo guardado en cada línea de venta
 
+### ✅ Fase 8 — Uso diario
+- [x] **Caja diaria** (`features/caja`, `/caja`): apertura con fondo (sugiere lo contado en el último cierre), ingresos y retiros con concepto, cierre con arqueo (esperado, contado, diferencia, auditoría de faltantes y sobrantes) e historial (`caja:historial`, solo admin)
+  - Esperado = fondo + cobros en efectivo − reembolsos en efectivo + ingresos − retiros, por el periodo de la caja (apertura → cierre). Al cerrar se guarda una foto (`resumen` JSON)
+  - Una sola caja abierta (índice único parcial). Un retiro no puede dejar la caja en negativo
+  - No es obligatoria: el punto de venta avisa si está cerrada. Los pagos a proveedores en efectivo **no** se descuentan solos: se registran como retiro
+- [x] **Devoluciones parciales** (`registrarDevolucion`, permiso `venta:devolver`, solo admin): por línea y cantidad; lo que vuelve en buen estado reingresa al stock (kardex `DEVOLUCION_VENTA`), lo dañado no
+  - Rebaja el total; si lo pagado supera el nuevo total, se reembolsa la diferencia por el método elegido (en efectivo sale de la caja)
+  - `VentaDetalle.cantidadDevuelta`/`montoDevuelto`: los reportes usan cantidades netas y el dinero recibido resta los reembolsos
+  - Una venta con devoluciones ya no se anula (se devuelve lo que queda); no se anula un pago ya reembolsado
+
+### ✅ Publicación y ajustes posteriores
+- [x] **Publicado en Vercel** (`balanzasv1.vercel.app`) desde GitHub. Variables: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` y `APP_URL` (las dos últimas = la URL de Vercel). Usa **la misma BD de Neon** que el desarrollo local
+- [x] `npm run build` ahora es `prisma generate && next build` (Vercel no tiene `generated/prisma`, que está en `.gitignore`)
+- [x] **Celular:** en venta, compra y ajustes de inventario cada producto se muestra como tarjeta (campos uno debajo de otro) y como fila de tabla cuando hay espacio; depende del ancho de la tarjeta (`@container`), no de la pantalla
+- [x] **Bucle de redirecciones** (`ERR_TOO_MANY_REDIRECTS`): pasaba con una cookie de sesión revocada (ej. al cambiar la clave se cierran las otras sesiones). `proxy.ts` ya no saca del login por tener cookie; la página de login verifica la sesión real con `getSession()` y solo redirige si es válida. `destinoSeguro` está en `src/lib/redirect.ts`
+
 ### Pendientes sueltos
 - Anular la boleta de una orden de servicio ya entregada
 - (Opcional) etiquetas con código de barras
-- Publicar (Vercel u otro) y configurar `APP_URL`
+- Mejoras propuestas aún no pedidas: cotizaciones/proformas, gastos de la tienda, instalar como app (PWA), pantalla de auditoría
+- Recomendado antes del uso real: separar la BD de producción (rama en Neon), revisar copias de seguridad de Neon, plan de Vercel para uso comercial, limpiar datos de prueba
