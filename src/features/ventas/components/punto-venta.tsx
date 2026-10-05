@@ -13,7 +13,6 @@ import { Input } from "@/components/ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { MoneyInput } from "@/components/form/money-input";
 import { PresentacionPicker } from "@/components/form/presentacion-picker";
@@ -49,6 +48,9 @@ type Props = {
 };
 
 let siguienteKey = 1;
+
+/** Columnas del carrito cuando la tarjeta es ancha: producto · cantidad · precio · subtotal · quitar */
+const COLUMNAS_POS = "@xl:grid-cols-[minmax(0,1fr)_8.5rem_9rem_6.5rem_2rem] @xl:items-start";
 
 export function PuntoVenta({ productos, clientes: clientesIniciales, metodos, puedeBajoMinimo, puedeCrearCliente }: Props) {
   const router = useRouter();
@@ -176,7 +178,7 @@ export function PuntoVenta({ productos, clientes: clientesIniciales, metodos, pu
   const error = (clave: string) => errores[clave]?.[0];
 
   return (
-    <div className="grid items-start gap-6 lg:grid-cols-[1fr_24rem]">
+    <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
       {/* ── Carrito ── */}
       <Card>
         <CardHeader>
@@ -225,35 +227,48 @@ export function PuntoVenta({ productos, clientes: clientesIniciales, metodos, pu
               Escanea o busca productos para agregarlos.
             </div>
           ) : (
-            <div className="rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-48">Producto</TableHead>
-                    <TableHead className="w-36 text-center">Cantidad</TableHead>
-                    <TableHead className="w-36">Precio unit.</TableHead>
-                    <TableHead className="text-right">Subtotal</TableHead>
-                    <TableHead className="w-10" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {lineas.map((l, i) => {
-                    const p = porId.get(l.presentacionId);
-                    const cantidad = Number(l.cantidad) || 0;
-                    const sinStock = !!p && cantidad > p.stock;
-                    const bajoMinimo = !!p && l.precio !== "" && aCentimos(l.precio) < aCentimos(p.precioMinimo);
-                    const conDescuento = !!p && aCentimos(l.precio) < aCentimos(p.precioVenta);
-                    const errCantidad = error(`items.${i}.cantidad`);
-                    const errPrecio = error(`items.${i}.precioUnitario`);
-                    return (
-                      <TableRow key={l.presentacionId} className="align-top">
-                        <TableCell className="whitespace-normal">
+            // Angosto (celular): cada producto es una tarjeta con los campos uno debajo de otro.
+            // Ancho: filas tipo tabla. Depende del ancho de la tarjeta (@container), no de la pantalla.
+            <div className="@container rounded-lg border">
+              <div className={cn("hidden border-b px-3 py-2 text-xs font-medium text-muted-foreground @xl:grid", COLUMNAS_POS)}>
+                <span>Producto</span>
+                <span>Cantidad</span>
+                <span>Precio unit.</span>
+                <span className="text-right">Subtotal</span>
+              </div>
+              <div className="divide-y">
+                {lineas.map((l, i) => {
+                  const p = porId.get(l.presentacionId);
+                  const cantidad = Number(l.cantidad) || 0;
+                  const sinStock = !!p && cantidad > p.stock;
+                  const bajoMinimo = !!p && l.precio !== "" && aCentimos(l.precio) < aCentimos(p.precioMinimo);
+                  const conDescuento = !!p && aCentimos(l.precio) < aCentimos(p.precioVenta);
+                  const errCantidad = error(`items.${i}.cantidad`);
+                  const errPrecio = error(`items.${i}.precioUnitario`);
+                  return (
+                    <div key={l.presentacionId} className={cn("grid gap-3 p-3", COLUMNAS_POS)}>
+                      {/* Nombre y quitar (en ancho, "quitar" va a la última columna) */}
+                      <div className="flex items-start gap-2 @xl:contents">
+                        <div className="min-w-0 flex-1">
                           <div className="text-sm font-medium">{p?.label ?? "Producto no disponible"}</div>
                           <div className="text-xs text-muted-foreground">
                             Stock: {p?.stock ?? 0} · Lista: {formatPEN(p?.precioVenta)}
                           </div>
-                        </TableCell>
-                        <TableCell>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Quitar"
+                          className="@xl:col-start-5 @xl:row-start-1"
+                          onClick={() => setLineas((prev) => prev.filter((_, idx) => idx !== i))}
+                        >
+                          <Trash2Icon />
+                        </Button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 @xl:contents">
+                        <div className="min-w-0">
+                          <span className="mb-1 block text-xs text-muted-foreground @xl:sr-only">Cantidad</span>
                           <div className="flex items-center gap-1">
                             <Button
                               variant="outline"
@@ -265,7 +280,7 @@ export function PuntoVenta({ productos, clientes: clientesIniciales, metodos, pu
                               <MinusIcon />
                             </Button>
                             <Input
-                              className="h-7 w-14 text-center"
+                              className="h-7 min-w-0 flex-1 text-center @xl:w-14 @xl:flex-none"
                               inputMode="numeric"
                               aria-label="Cantidad"
                               aria-invalid={sinStock || !!errCantidad}
@@ -282,10 +297,11 @@ export function PuntoVenta({ productos, clientes: clientesIniciales, metodos, pu
                               <PlusIcon />
                             </Button>
                           </div>
-                          {sinStock && <p className="mt-1 text-center text-xs text-destructive">Solo hay {p.stock}</p>}
+                          {sinStock && <p className="mt-1 text-xs text-destructive">Solo hay {p.stock}</p>}
                           {errCantidad && <p className="mt-1 text-xs text-destructive">{errCantidad}</p>}
-                        </TableCell>
-                        <TableCell>
+                        </div>
+                        <div className="min-w-0">
+                          <span className="mb-1 block text-xs text-muted-foreground @xl:sr-only">Precio unit.</span>
                           <MoneyInput
                             aria-label="Precio unitario"
                             aria-invalid={(bajoMinimo && !puedeBajoMinimo) || !!errPrecio}
@@ -300,23 +316,17 @@ export function PuntoVenta({ productos, clientes: clientesIniciales, metodos, pu
                             conDescuento && <p className="mt-1 text-xs text-muted-foreground">Con descuento</p>
                           )}
                           {errPrecio && <p className="mt-1 text-xs text-destructive">{errPrecio}</p>}
-                        </TableCell>
-                        <TableCell className="pt-3 text-right font-medium tabular-nums">{formatPEN(deCentimos(subtotal(l)))}</TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label="Quitar"
-                            onClick={() => setLineas((prev) => prev.filter((_, idx) => idx !== i))}
-                          >
-                            <Trash2Icon />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                        </div>
+                      </div>
+
+                      <div className="flex items-baseline justify-between @xl:block @xl:pt-1.5 @xl:text-right">
+                        <span className="text-xs text-muted-foreground @xl:sr-only">Subtotal</span>
+                        <span className="font-medium tabular-nums">{formatPEN(deCentimos(subtotal(l)))}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </CardContent>

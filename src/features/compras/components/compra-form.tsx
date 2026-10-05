@@ -12,7 +12,6 @@ import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from "@
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
-import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/form/form-field";
 import { MoneyInput } from "@/components/form/money-input";
@@ -21,12 +20,17 @@ import { SelectField, type Opcion } from "@/components/form/select-field";
 import { fechaInput, hoyLima } from "@/lib/dates";
 import { formatPEN } from "@/lib/money";
 import { handleActionResult } from "@/lib/notify";
+import { cn } from "@/lib/utils";
 import { guardarCompraAction } from "../actions";
 import { EMPAQUE_LABELS, TIPOS_EMPAQUE, UNIDADES_EMPAQUE, type TipoEmpaque } from "../constants";
 import type { CompraDetalleDTO, PresentacionCompraOpcion } from "../queries";
 import { compraSchema, type CompraInput, type CompraOutput, type DetalleCompraInput } from "../schemas";
 
-const OPCIONES_EMPAQUE = TIPOS_EMPAQUE.map((e) => ({
+/** Columnas por producto cuando la tarjeta es ancha (una fila por producto). */
+const COLUMNAS_COMPRA =
+  "@5xl:grid-cols-[minmax(0,1fr)_7.5rem_5rem_5rem_8rem_4.5rem_6rem_6.5rem_2rem] @5xl:items-start";
+
+const OPCIONES_EMPAQUE =TIPOS_EMPAQUE.map((e) => ({
   value: e,
   label: EMPAQUE_LABELS[e].singular[0]!.toUpperCase() + EMPAQUE_LABELS[e].singular.slice(1),
 }));
@@ -202,40 +206,56 @@ export function CompraForm({ compra, proveedores, presentaciones, puedeRecibir }
           {errorDetalles && <p className="text-sm text-destructive">{errorDetalles}</p>}
 
           {fields.length > 0 && (
-            <div className="rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-56">Producto</TableHead>
-                    <TableHead className="w-32">Empaque</TableHead>
-                    <TableHead className="w-24">Und./emp.</TableHead>
-                    <TableHead className="w-24">Cantidad</TableHead>
-                    <TableHead className="w-36">Costo x empaque</TableHead>
-                    <TableHead className="text-right">Unidades</TableHead>
-                    <TableHead className="text-right">Costo unit.</TableHead>
-                    <TableHead className="text-right">Subtotal</TableHead>
-                    <TableHead className="w-10" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {fields.map((field, i) => {
-                    const d = detalles[i];
-                    const e = errors.detalles?.[i];
-                    const calc = d ? calcularLinea(d) : null;
-                    return (
-                      <TableRow key={field.key} className="align-top">
-                        <TableCell className="whitespace-normal">
+            // Angosto (celular): cada producto es una tarjeta con los campos uno debajo de otro.
+            // Ancho: una fila por producto. Depende del ancho de la tarjeta (@container), no de la pantalla.
+            <div className="@container rounded-lg border">
+              <div className={cn("hidden border-b px-3 py-2 text-xs font-medium text-muted-foreground @5xl:grid", COLUMNAS_COMPRA)}>
+                <span>Producto</span>
+                <span>Empaque</span>
+                <span>Und./emp.</span>
+                <span>Cantidad</span>
+                <span>Costo x empaque</span>
+                <span className="text-right">Unidades</span>
+                <span className="text-right">Costo unit.</span>
+                <span className="text-right">Subtotal</span>
+              </div>
+              <div className="divide-y">
+                {fields.map((field, i) => {
+                  const d = detalles[i];
+                  const e = errors.detalles?.[i];
+                  const calc = d ? calcularLinea(d) : null;
+                  const etiqueta = "mb-1 block text-xs text-muted-foreground @5xl:sr-only";
+                  return (
+                    <div key={field.key} className={cn("grid gap-3 p-3", COLUMNAS_COMPRA)}>
+                      {/* Nombre y quitar (en ancho, "quitar" va a la última columna) */}
+                      <div className="flex items-start gap-2 @5xl:contents">
+                        <div className="min-w-0 flex-1">
                           <div className="text-sm font-medium">{nombres.get(field.presentacionId)?.label ?? "—"}</div>
                           {e?.presentacionId && <p className="text-xs text-destructive">{e.presentacionId.message}</p>}
-                        </TableCell>
-                        <TableCell>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Quitar"
+                          className="@5xl:col-start-9 @5xl:row-start-1"
+                          onClick={() => remove(i)}
+                        >
+                          <Trash2Icon />
+                        </Button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 @lg:grid-cols-4 @5xl:contents">
+                        <div className="min-w-0">
+                          <span className={etiqueta}>Empaque</span>
                           <SelectField
                             value={d?.empaque ?? "UNIDAD"}
                             onChange={(v) => cambiarEmpaque(i, v as TipoEmpaque)}
                             opciones={OPCIONES_EMPAQUE}
                           />
-                        </TableCell>
-                        <TableCell>
+                        </div>
+                        <div className="min-w-0">
+                          <span className={etiqueta}>Und./emp.</span>
                           <Input
                             inputMode="numeric"
                             aria-label="Unidades por empaque"
@@ -244,8 +264,9 @@ export function CompraForm({ compra, proveedores, presentaciones, puedeRecibir }
                             {...form.register(`detalles.${i}.unidadesPorEmpaque`)}
                           />
                           {e?.unidadesPorEmpaque && <p className="text-xs text-destructive">{e.unidadesPorEmpaque.message}</p>}
-                        </TableCell>
-                        <TableCell>
+                        </div>
+                        <div className="min-w-0">
+                          <span className={etiqueta}>Cantidad</span>
                           <Input
                             inputMode="numeric"
                             aria-label="Cantidad de empaques"
@@ -253,41 +274,41 @@ export function CompraForm({ compra, proveedores, presentaciones, puedeRecibir }
                             {...form.register(`detalles.${i}.cantidadEmpaques`)}
                           />
                           {e?.cantidadEmpaques && <p className="text-xs text-destructive">{e.cantidadEmpaques.message}</p>}
-                        </TableCell>
-                        <TableCell>
+                        </div>
+                        <div className="min-w-0">
+                          <span className={etiqueta}>Costo x empaque</span>
                           <MoneyInput
                             aria-label="Costo por empaque"
                             aria-invalid={!!e?.costoEmpaque}
                             {...form.register(`detalles.${i}.costoEmpaque`)}
                           />
                           {e?.costoEmpaque && <p className="text-xs text-destructive">{e.costoEmpaque.message}</p>}
-                        </TableCell>
-                        <TableCell className="pt-4 text-right tabular-nums">{calc?.unidadesTotales ?? 0}</TableCell>
-                        <TableCell className="pt-4 text-right tabular-nums">
-                          {calc ? formatPEN(calc.costoUnitario) : "—"}
-                        </TableCell>
-                        <TableCell className="pt-4 text-right font-medium tabular-nums">
-                          {calc ? formatPEN(calc.subtotal) : "—"}
-                        </TableCell>
-                        <TableCell>
-                          <Button type="button" variant="ghost" size="icon-sm" aria-label="Quitar" onClick={() => remove(i)}>
-                            <Trash2Icon />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-                <TableFooter>
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-right font-medium">
-                      Total
-                    </TableCell>
-                    <TableCell className="text-right text-base font-semibold tabular-nums">{formatPEN(total)}</TableCell>
-                    <TableCell />
-                  </TableRow>
-                </TableFooter>
-              </Table>
+                        </div>
+                      </div>
+
+                      {/* Cálculos: en angosto, tres datos en fila; en ancho, sus columnas */}
+                      <div className="grid grid-cols-3 gap-2 rounded-md bg-muted/40 px-2 py-1.5 text-sm @5xl:contents">
+                        <div className="@5xl:pt-1.5 @5xl:text-right">
+                          <span className="block text-xs text-muted-foreground @5xl:sr-only">Unidades</span>
+                          <span className="tabular-nums">{calc?.unidadesTotales ?? 0}</span>
+                        </div>
+                        <div className="@5xl:pt-1.5 @5xl:text-right">
+                          <span className="block text-xs text-muted-foreground @5xl:sr-only">Costo unit.</span>
+                          <span className="tabular-nums">{calc ? formatPEN(calc.costoUnitario) : "—"}</span>
+                        </div>
+                        <div className="text-right @5xl:pt-1.5">
+                          <span className="block text-xs text-muted-foreground @5xl:sr-only">Subtotal</span>
+                          <span className="font-medium tabular-nums">{calc ? formatPEN(calc.subtotal) : "—"}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex items-baseline justify-end gap-3 border-t px-3 py-2">
+                <span className="font-medium">Total</span>
+                <span className="text-base font-semibold tabular-nums">{formatPEN(total)}</span>
+              </div>
             </div>
           )}
           {fields.length === 0 && (

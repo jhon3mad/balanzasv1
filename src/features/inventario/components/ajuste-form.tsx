@@ -11,7 +11,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { FieldGroup } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/form/form-field";
 import { MoneyInput } from "@/components/form/money-input";
@@ -29,6 +28,23 @@ const OPCIONES_DIRECCION = [
   { value: "ENTRADA", label: "Entrada (+)" },
   { value: "SALIDA", label: "Salida (−)" },
 ];
+
+/**
+ * Columnas por producto cuando la tarjeta es ancha, según el motivo. Clases completas y fijas
+ * (Tailwind no detecta clases armadas en tiempo de ejecución).
+ * producto · stock · [tipo] · cantidad · [costo] · diferencia · queda · quitar
+ */
+const COLUMNAS_AJUSTE = {
+  simple: { grid: "@4xl:grid-cols-[minmax(0,1fr)_6rem_7rem_6rem_5rem_2rem] @4xl:items-start", quitar: "@4xl:col-start-6 @4xl:row-start-1" },
+  conCosto: {
+    grid: "@4xl:grid-cols-[minmax(0,1fr)_6rem_7rem_8rem_6rem_5rem_2rem] @4xl:items-start",
+    quitar: "@4xl:col-start-7 @4xl:row-start-1",
+  },
+  libre: {
+    grid: "@4xl:grid-cols-[minmax(0,1fr)_6rem_8.5rem_7rem_8rem_6rem_5rem_2rem] @4xl:items-start",
+    quitar: "@4xl:col-start-8 @4xl:row-start-1",
+  },
+};
 
 /** Diferencia que producirá la línea (solo para mostrar). */
 function diferencia(motivo: MotivoAjuste, linea: LineaAjusteInput, stock: number): number | null {
@@ -68,6 +84,7 @@ export function AjusteForm({ presentaciones }: { presentaciones: PresentacionAju
 
   const etiquetaCantidad = info.modo === "conteo" ? "Contado" : info.modo === "salida" ? "Sale" : info.modo === "entrada" ? "Entra" : "Cantidad";
   const mostrarCosto = info.modo === "entrada" || info.modo === "libre";
+  const columnas = COLUMNAS_AJUSTE[info.modo === "libre" ? "libre" : mostrarCosto ? "conCosto" : "simple"];
 
   return (
     <form onSubmit={onSubmit} noValidate className="grid max-w-5xl gap-6">
@@ -115,35 +132,53 @@ export function AjusteForm({ presentaciones }: { presentaciones: PresentacionAju
           {errorLineas && <p className="text-sm text-destructive">{errorLineas}</p>}
 
           {fields.length > 0 ? (
-            <div className="rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-56">Producto</TableHead>
-                    <TableHead className="text-right">Stock actual</TableHead>
-                    {info.modo === "libre" && <TableHead className="w-36">Tipo</TableHead>}
-                    <TableHead className="w-28">{etiquetaCantidad}</TableHead>
-                    {mostrarCosto && <TableHead className="w-36">Costo unit.</TableHead>}
-                    <TableHead className="text-right">Diferencia</TableHead>
-                    <TableHead className="text-right">Queda</TableHead>
-                    <TableHead className="w-10" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {fields.map((field, i) => {
-                    const p = porId.get(field.presentacionId);
-                    const linea = lineas[i];
-                    const stock = p?.stock ?? 0;
-                    const dif = linea ? diferencia(motivo, linea, stock) : null;
-                    const queda = dif === null ? null : stock + dif;
-                    const e = errors.lineas?.[i];
-                    const esEntrada = info.modo === "entrada" || (info.modo === "libre" && linea?.direccion === "ENTRADA");
-                    return (
-                      <TableRow key={field.key} className="align-top">
-                        <TableCell className="text-sm font-medium whitespace-normal">{p?.label ?? "—"}</TableCell>
-                        <TableCell className="pt-4 text-right tabular-nums">{stock}</TableCell>
+            // Angosto (celular): cada producto es una tarjeta con los campos uno debajo de otro.
+            // Ancho: una fila por producto. Depende del ancho de la tarjeta (@container), no de la pantalla.
+            <div className="@container rounded-lg border">
+              <div className={cn("hidden border-b px-3 py-2 text-xs font-medium text-muted-foreground @4xl:grid", columnas.grid)}>
+                <span>Producto</span>
+                <span className="text-right">Stock actual</span>
+                {info.modo === "libre" && <span>Tipo</span>}
+                <span>{etiquetaCantidad}</span>
+                {mostrarCosto && <span>Costo unit.</span>}
+                <span className="text-right">Diferencia</span>
+                <span className="text-right">Queda</span>
+              </div>
+              <div className="divide-y">
+                {fields.map((field, i) => {
+                  const p = porId.get(field.presentacionId);
+                  const linea = lineas[i];
+                  const stock = p?.stock ?? 0;
+                  const dif = linea ? diferencia(motivo, linea, stock) : null;
+                  const queda = dif === null ? null : stock + dif;
+                  const e = errors.lineas?.[i];
+                  const esEntrada = info.modo === "entrada" || (info.modo === "libre" && linea?.direccion === "ENTRADA");
+                  const etiqueta = "mb-1 block text-xs text-muted-foreground @4xl:sr-only";
+                  return (
+                    <div key={field.key} className={cn("grid gap-3 p-3", columnas.grid)}>
+                      {/* Nombre, stock y quitar (en ancho, "quitar" va a la última columna) */}
+                      <div className="flex items-start gap-2 @4xl:contents">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium">{p?.label ?? "—"}</div>
+                          <div className="text-xs text-muted-foreground @4xl:hidden">Stock actual: {stock}</div>
+                        </div>
+                        <div className="hidden pt-1.5 text-right tabular-nums @4xl:block">{stock}</div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Quitar"
+                          className={columnas.quitar}
+                          onClick={() => remove(i)}
+                        >
+                          <Trash2Icon />
+                        </Button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 @4xl:contents">
                         {info.modo === "libre" && (
-                          <TableCell>
+                          <div className="min-w-0">
+                            <span className={etiqueta}>Tipo</span>
                             <Controller
                               control={form.control}
                               name={`lineas.${i}.direccion`}
@@ -151,9 +186,10 @@ export function AjusteForm({ presentaciones }: { presentaciones: PresentacionAju
                                 <SelectField value={f.value} onChange={f.onChange} opciones={OPCIONES_DIRECCION} />
                               )}
                             />
-                          </TableCell>
+                          </div>
                         )}
-                        <TableCell>
+                        <div className="min-w-0">
+                          <span className={etiqueta}>{etiquetaCantidad}</span>
                           <Input
                             inputMode="numeric"
                             aria-label={etiquetaCantidad}
@@ -161,9 +197,10 @@ export function AjusteForm({ presentaciones }: { presentaciones: PresentacionAju
                             {...form.register(`lineas.${i}.cantidad`)}
                           />
                           {e?.cantidad && <p className="text-xs text-destructive">{e.cantidad.message}</p>}
-                        </TableCell>
+                        </div>
                         {mostrarCosto && (
-                          <TableCell>
+                          <div className="min-w-0">
+                            <span className={etiqueta}>Costo unit.</span>
                             {esEntrada ? (
                               <>
                                 <MoneyInput
@@ -175,32 +212,37 @@ export function AjusteForm({ presentaciones }: { presentaciones: PresentacionAju
                                 {e?.costoUnitario && <p className="text-xs text-destructive">{e.costoUnitario.message}</p>}
                               </>
                             ) : (
-                              <span className="block pt-2 text-xs text-muted-foreground">—</span>
+                              <span className="block pt-2 text-xs text-muted-foreground">— (solo en entradas)</span>
                             )}
-                          </TableCell>
+                          </div>
                         )}
-                        <TableCell
-                          className={cn(
-                            "pt-4 text-right font-medium tabular-nums",
-                            dif !== null && dif > 0 && "text-emerald-600 dark:text-emerald-400",
-                            dif !== null && dif < 0 && "text-destructive",
-                          )}
-                        >
-                          {dif === null ? "—" : dif > 0 ? `+${dif}` : dif}
-                        </TableCell>
-                        <TableCell className={cn("pt-4 text-right tabular-nums", queda !== null && queda < 0 && "font-medium text-destructive")}>
-                          {queda ?? "—"}
-                        </TableCell>
-                        <TableCell>
-                          <Button type="button" variant="ghost" size="icon-sm" aria-label="Quitar" onClick={() => remove(i)}>
-                            <Trash2Icon />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                      </div>
+
+                      {/* Resultado: en angosto, en fila; en ancho, sus columnas */}
+                      <div className="grid grid-cols-2 gap-2 rounded-md bg-muted/40 px-2 py-1.5 text-sm @4xl:contents">
+                        <div className="@4xl:pt-1.5 @4xl:text-right">
+                          <span className="block text-xs text-muted-foreground @4xl:sr-only">Diferencia</span>
+                          <span
+                            className={cn(
+                              "font-medium tabular-nums",
+                              dif !== null && dif > 0 && "text-emerald-600 dark:text-emerald-400",
+                              dif !== null && dif < 0 && "text-destructive",
+                            )}
+                          >
+                            {dif === null ? "—" : dif > 0 ? `+${dif}` : dif}
+                          </span>
+                        </div>
+                        <div className="text-right @4xl:pt-1.5">
+                          <span className="block text-xs text-muted-foreground @4xl:sr-only">Queda</span>
+                          <span className={cn("tabular-nums", queda !== null && queda < 0 && "font-medium text-destructive")}>
+                            {queda ?? "—"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
