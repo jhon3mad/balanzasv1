@@ -280,19 +280,23 @@ export function ItemsOrden({ ordenId, numero, lineas, total, totalLista, editabl
           onClose={() => setAgregando(false)}
         />
       )}
-      <ConfirmDialog
-        open={!!quitar}
-        onOpenChange={(open) => !open && setQuitar(null)}
-        titulo="¿Quitar de la orden?"
-        descripcion={
-          quitar?.tipoItem === "PRODUCTO"
-            ? `"${quitar.descripcion}" (${quitar.cantidad}) volverá al stock. Orden ${numero}.`
-            : `Se quitará "${quitar?.descripcion}" de la orden ${numero}.`
-        }
-        confirmarTexto="Quitar"
-        destructivo
-        onConfirm={() => quitarItemOrdenAction({ detalleId: quitar!.id })}
-      />
+      {/* Se monta solo con una línea elegida: con `quitar!.id` siempre montado, el React Compiler
+          lee `quitar.id` en cada render para memorizar el callback y falla con quitar = null */}
+      {quitar && (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => !open && setQuitar(null)}
+          titulo="¿Quitar de la orden?"
+          descripcion={
+            quitar.tipoItem === "PRODUCTO"
+              ? `"${quitar.descripcion}" (${quitar.cantidad}) volverá al stock. Orden ${numero}.`
+              : `Se quitará "${quitar.descripcion}" de la orden ${numero}.`
+          }
+          confirmarTexto="Quitar"
+          destructivo
+          onConfirm={() => quitarItemOrdenAction({ detalleId: quitar.id })}
+        />
+      )}
     </>
   );
 }

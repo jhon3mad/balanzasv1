@@ -41,7 +41,8 @@ export const auth = betterAuth({
       roles,
       defaultRole: "vendedor",
       adminRoles: ["admin"],
-      bannedUserMessage: "Tu usuario está desactivado. Comunícate con el administrador.",
+      bannedUserMessage:
+        "Tu usuario está desactivado. Comunícate con el administrador.",
     }),
     // Debe ir al final: permite que las Server Actions escriban cookies
     nextCookies(),

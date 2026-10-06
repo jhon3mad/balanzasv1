@@ -61,6 +61,7 @@ prisma/schema.prisma            esquema completo (todas las tablas ya existen, i
 - Componentes: `FormField`, `MoneyInput`/`UnitInput`, `SelectField` (`""` = vacío) y `PresentacionPicker` (combobox de productos).
 - `useFieldArray` siempre con `keyName: "key"`, para no pisar el `id` real de cada línea.
 - Usar `useWatch` en lugar de `form.watch` (lo exige el React Compiler).
+- **React Compiler y valores que pueden ser `null`:** nunca `x!.prop` dentro de un callback de un componente siempre montado (ej. `<ConfirmDialog open={!!x} onConfirm={() => accion(x!.id)} />`). El compilador lee `x.prop` en cada render para memorizar el callback y la página se cae en el navegador con `Cannot read properties of null`. Montar el diálogo solo cuando hay valor: `{x && <Dialogo open … />}`. Las pruebas por HTTP no lo detectan (solo ven el HTML del servidor; el error es al hidratar en el navegador).
 - **Listas de productos editables (se usan desde el celular):** no usar `<Table>` con inputs. Usar una sola versión con `@container`: en angosto, tarjeta con los campos uno debajo de otro; en ancho, grid tipo tabla (`@xl:`/`@4xl:`/`@5xl:grid-cols-[…]` y envoltorios `@…:contents`). Ver `punto-venta.tsx`, `compra-form.tsx` y `ajuste-form.tsx`. Las clases de columnas deben escribirse completas (Tailwind no detecta clases armadas en tiempo de ejecución).
 
 ### Números

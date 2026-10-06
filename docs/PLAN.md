@@ -93,6 +93,8 @@
 - [x] **Celular:** en venta, compra y ajustes de inventario cada producto se muestra como tarjeta (campos uno debajo de otro) y como fila de tabla cuando hay espacio; depende del ancho de la tarjeta (`@container`), no de la pantalla
 - [x] **Bucle de redirecciones** (`ERR_TOO_MANY_REDIRECTS`): pasaba con una cookie de sesión revocada (ej. al cambiar la clave se cierran las otras sesiones). `proxy.ts` ya no saca del login por tener cookie; la página de login verifica la sesión real con `getSession()` y solo redirige si es válida. `destinoSeguro` está en `src/lib/redirect.ts`
 
+- [x] **Detalle de orden de servicio se caía** (`Cannot read properties of null (reading 'id')`): el diálogo "Quitar de la orden" estaba siempre montado con `quitar!.id` y el React Compiler leía `quitar.id` en cada render. Ahora se monta solo con una línea elegida
+
 ### Pendientes sueltos
 - Anular la boleta de una orden de servicio ya entregada
 - (Opcional) etiquetas con código de barras
